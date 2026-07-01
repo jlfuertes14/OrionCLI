@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+/target_cli/
+orion-target/
+
+# Environment / secrets
+.env
+*.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cargo lock for binaries (keep for libraries)
+# Cargo.lock  ← keep this committed for a binary crate
