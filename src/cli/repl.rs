@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use colored::Colorize;
 use crate::config::Settings;
 use crate::cli::theme::{self, format_user_prompt};
+use crate::cli::command_picker;
 
 struct OrionHelper;
 
@@ -68,6 +69,14 @@ impl Repl {
 
         let mut orchestrator = crate::agent::AgentOrchestrator::new(self.settings.clone());
 
+        // Print the hint once at startup
+        println!(
+            "  {} Type {} for commands, {} to quit\n",
+            "tip:".truecolor(107, 114, 128),
+            "/".bold().truecolor(99, 179, 237),
+            "/exit".bold().truecolor(99, 179, 237),
+        );
+
         loop {
             let readline = rl.readline(&format_user_prompt());
             match readline {
@@ -76,6 +85,38 @@ impl Repl {
                     if trimmed.is_empty() {
                         continue;
                     }
+
+                    // If user typed exactly "/" (just a slash), open the picker
+                    if trimmed == "/" {
+                        // Move to next line so picker renders below the prompt
+                        println!();
+                        match command_picker::run_picker() {
+                            Ok(Some(cmd)) => {
+                                // Echo the selected command and execute it
+                                println!(
+                                    "{}",
+                                    format!("❯ {}", cmd).truecolor(99, 179, 237)
+                                );
+                                let _ = rl.add_history_entry(&cmd);
+                                let (should_exit, settings_changed) =
+                                    self.handle_slash_command(&cmd);
+                                if settings_changed {
+                                    orchestrator.update_settings(self.settings.clone());
+                                }
+                                if should_exit {
+                                    break;
+                                }
+                            }
+                            Ok(None) => {
+                                // Cancelled — just continue
+                            }
+                            Err(e) => {
+                                theme::print_error(&format!("Picker error: {}", e));
+                            }
+                        }
+                        continue;
+                    }
+
                     let _ = rl.add_history_entry(trimmed);
 
                     if trimmed.starts_with('/') {
@@ -126,12 +167,16 @@ impl Repl {
                 return (true, false);
             }
             "/help" => {
-                println!("\n{}", "Available Commands:".bold().yellow());
-                println!("  /exit, /quit             - Terminate the session");
-                println!("  /clear                   - Clear the terminal screen");
-                println!("  /model                   - View current model and provider");
-                println!("  /model <provider>:<model>- Change active LLM provider and model");
-                println!("  /help                    - Show this help summary\n");
+                println!("\n{}", "Available Commands:".bold().truecolor(99, 179, 237));
+                for c in command_picker::COMMANDS {
+                    println!(
+                        "  {}  {:<14} {}",
+                        c.icon,
+                        c.name.bold().truecolor(94, 234, 212),
+                        c.description.truecolor(107, 114, 128),
+                    );
+                }
+                println!();
             }
             "/clear" => {
                 let _ = std::process::Command::new("cmd")
@@ -140,12 +185,14 @@ impl Repl {
                     .or_else(|_| {
                         std::process::Command::new("clear").status()
                     });
+                // Reprint logo after clear
+                theme::print_logo(&self.settings.active_model, &self.settings.active_provider);
             }
             "/model" => {
                 if parts.len() == 1 {
-                    println!("\n{}", "Current LLM Model Settings:".bold().yellow());
-                    println!("  Provider: {}", self.settings.active_provider.bold().cyan());
-                    println!("  Model:    {}\n", self.settings.active_model.bold().cyan());
+                    println!("\n{}", "Current LLM Model Settings:".bold().truecolor(99, 179, 237));
+                    println!("  Provider: {}", self.settings.active_provider.bold().truecolor(94, 234, 212));
+                    println!("  Model:    {}\n", self.settings.active_model.bold().truecolor(94, 234, 212));
                 } else {
                     let full_model = parts[1];
                     if let Some(idx) = full_model.find(':') {
@@ -158,18 +205,24 @@ impl Repl {
                         } else {
                             settings_changed = true;
                             theme::print_success(&format!(
-                                "Switched to provider: {} | model: {}",
-                                provider.bold().cyan(),
-                                model.bold().cyan()
+                                "Switched to {} · {}",
+                                provider.bold().truecolor(94, 234, 212),
+                                model.bold().truecolor(94, 234, 212),
                             ));
                         }
                     } else {
                         theme::print_warning("Invalid format. Use: /model <provider>:<model>");
+                        theme::print_warning("Example: /model anthropic:claude-opus-4-5");
                     }
                 }
             }
             _ => {
-                theme::print_warning(&format!("Unknown slash command: {}. Type /help for assistance.", command));
+                theme::print_warning(&format!(
+                    "Unknown command: {}  —  type {} or press {} for the command picker.",
+                    command.bold(),
+                    "/help".bold().truecolor(99, 179, 237),
+                    "/".bold().truecolor(99, 179, 237),
+                ));
             }
         }
 
