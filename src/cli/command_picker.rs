@@ -31,6 +31,7 @@ pub fn run_picker() -> io::Result<Option<String>> {
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
+    execute!(stdout, cursor::SavePosition)?;
 
     let result = loop {
         let filtered = filter_commands(&query);
@@ -115,8 +116,8 @@ fn render(
     filtered: &[&Command],
     selected: usize,
 ) -> io::Result<()> {
-    // Move cursor to start of picker block and clear downward
-    execute!(stdout, cursor::SavePosition)?;
+    // Restore cursor to start of picker block and clear downward
+    execute!(stdout, cursor::RestorePosition)?;
     execute!(stdout, terminal::Clear(ClearType::FromCursorDown))?;
 
     let max_name_len = COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(10);
@@ -231,9 +232,8 @@ fn render(
     Ok(())
 }
 
-fn clear_picker(stdout: &mut io::Stdout, lines: usize) -> io::Result<()> {
-    // Move up `lines` rows and clear from cursor down
-    execute!(stdout, cursor::MoveUp(lines as u16))?;
+fn clear_picker(stdout: &mut io::Stdout, _lines: usize) -> io::Result<()> {
+    execute!(stdout, cursor::RestorePosition)?;
     execute!(stdout, terminal::Clear(ClearType::FromCursorDown))?;
     stdout.flush()?;
     Ok(())
@@ -245,6 +245,7 @@ pub fn run_skills_picker(registry: &mut crate::skills::SkillRegistry) -> io::Res
 
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
+    execute!(stdout, cursor::SavePosition)?;
 
     let result = loop {
         let list = registry.list();
@@ -309,7 +310,7 @@ fn render_skills(
     filtered: &[&crate::skills::Skill],
     selected: usize,
 ) -> io::Result<()> {
-    execute!(stdout, cursor::SavePosition)?;
+    execute!(stdout, cursor::RestorePosition)?;
     execute!(stdout, terminal::Clear(ClearType::FromCursorDown))?;
 
     let max_name_len = 16usize;

@@ -53,9 +53,20 @@ impl Repl {
                         break Some(line);
                     }
                     (KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        execute!(stdout, Print("\r\n"))?;
-                        stdout.flush()?;
-                        break None;
+                        if line.is_empty() {
+                            execute!(stdout, Print("\r\n"))?;
+                            stdout.flush()?;
+                            break None;
+                        } else {
+                            line.clear();
+                            execute!(
+                                stdout,
+                                Print("\r"),
+                                terminal::Clear(ClearType::CurrentLine),
+                                Print(prompt)
+                            )?;
+                            stdout.flush()?;
+                        }
                     }
                     (KeyCode::Backspace, _) => {
                         if !line.is_empty() {
@@ -106,7 +117,7 @@ impl Repl {
                         stdout.flush()?;
                     }
                     (KeyCode::Char(c), _) => {
-                        if line.is_empty() && c == '/' {
+                        if (line.is_empty() || line.starts_with("/skill load")) && c == '/' {
                             terminal::disable_raw_mode()?;
                             println!();
                             if let Some(selected) = command_picker::run_picker()? {
