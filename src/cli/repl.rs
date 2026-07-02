@@ -270,14 +270,20 @@ impl Repl {
                                 let repo = parts[2];
                                 theme::print_info(&format!("Downloading skill from repository '{}'...", repo));
                                 match crate::skills::download_skill(repo).await {
-                                    Ok(name) => {
+                                    Ok(names) => {
                                         theme::print_success(&format!(
-                                            "Successfully added and loaded skill: {}",
-                                            name.bold().truecolor(94, 234, 212)
+                                            "Successfully downloaded {} skill(s):",
+                                            names.len()
                                         ));
                                         let _ = self.skill_registry.scan_skills_dir();
-                                        if let Some(skill) = self.skill_registry.get(&name) {
-                                            orchestrator.load_skill(skill);
+                                        for name in names {
+                                            println!(
+                                                "  - {}",
+                                                name.bold().truecolor(94, 234, 212)
+                                            );
+                                            if let Some(skill) = self.skill_registry.get(&name) {
+                                                orchestrator.load_skill(skill);
+                                            }
                                         }
                                     }
                                     Err(e) => {

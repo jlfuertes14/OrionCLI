@@ -85,7 +85,7 @@ to gather information from multiple sources before answering.
     }
 }
 
-pub async fn download_skill(github_repo: &str) -> Result<String> {
+pub async fn download_skill(github_repo: &str) -> Result<Vec<String>> {
     let parts: Vec<&str> = github_repo.split('/').collect();
     if parts.len() != 2 {
         return Err(anyhow!("Invalid GitHub repository format. Use: owner/repo"));
@@ -97,28 +97,87 @@ pub async fn download_skill(github_repo: &str) -> Result<String> {
         .user_agent("OrionBot-CLI")
         .build()?;
 
+    let mut downloaded_names = Vec::new();
+
+    // 1. Try fetching the /skills directory contents via GitHub API
+    let api_url = format!("https://api.github.com/repos/{}/{}/contents/skills", owner, repo);
+    let resp = client.get(&api_url).send().await?;
+
+    if resp.status().is_success() {
+        if let Ok(items) = resp.json::<Vec<serde_json::Value>>().await {
+            for item in items {
+                if item.get("type").and_then(|t| t.as_str()) == Some("dir") {
+                    if let Some(dir_name) = item.get("name").and_then(|n| n.as_str()) {
+                        // Attempt to fetch SKILL.md from this directory
+                        match fetch_and_save_skill(&client, owner, repo, &format!("skills/{}", dir_name), dir_name).await {
+                            Ok(name) => downloaded_names.push(name),
+                            Err(_) => {} // skip if no SKILL.md in this folder
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. If no skills were found in /skills directory, try root SKILL.md
+    if downloaded_names.is_empty() {
+        match fetch_and_save_skill(&client, owner, repo, "", repo).await {
+            Ok(name) => downloaded_names.push(name),
+            Err(e) => {
+                return Err(anyhow!("Could not find SKILL.md in root or /skills/ subdirectories: {}", e));
+            }
+        }
+    }
+
+    Ok(downloaded_names)
+}
+
+async fn fetch_and_save_skill(
+    client: &reqwest::Client,
+    owner: &str,
+    repo: &str,
+    subpath: &str,
+    save_filename: &str,
+) -> Result<String> {
+    let path_part = if subpath.is_empty() {
+        "SKILL.md".to_string()
+    } else {
+        format!("{}/SKILL.md", subpath)
+    };
+
     // Try main branch first
-    let mut url = format!("https://raw.githubusercontent.com/{}/{}/main/skill.toml", owner, repo);
+    let mut url = format!("https://raw.githubusercontent.com/{}/{}/main/{}", owner, repo, path_part);
     let mut resp = client.get(&url).send().await?;
 
     if !resp.status().is_success() {
         // Try master branch fallback
-        url = format!("https://raw.githubusercontent.com/{}/{}/master/skill.toml", owner, repo);
+        url = format!("https://raw.githubusercontent.com/{}/{}/master/{}", owner, repo, path_part);
         resp = client.get(&url).send().await?;
     }
 
     if !resp.status().is_success() {
-        return Err(anyhow!(
-            "Failed to download skill.toml from main or master branch (HTTP {})",
-            resp.status()
-        ));
+        return Err(anyhow!("SKILL.md not found in branch (HTTP {})", resp.status()));
     }
 
     let content = resp.text().await?;
-    
-    // Validate it is valid TOML for our Skill struct
-    let _val: Skill = toml::from_str(&content)
-        .map_err(|e| anyhow!("Downloaded file is not a valid skill TOML: {}", e))?;
+    let (name, description, body) = parse_skill_markdown(&content)?;
+
+    // Format as TOML compatible with our Skill registry
+    let skill_toml = format!(
+        r#"[skill]
+name = "{}"
+description = "{}"
+version = "1.0"
+
+[prompt]
+inject = """
+{}
+"""
+"#,
+        name,
+        description.replace('"', "\\\""),
+        body.replace('\\', "\\\\").replace('"', "\\\"")
+    );
 
     let skills_dir = dirs::home_dir()
         .ok_or_else(|| anyhow!("Could not resolve home directory"))?
@@ -126,9 +185,37 @@ pub async fn download_skill(github_repo: &str) -> Result<String> {
         .join("skills");
 
     std::fs::create_dir_all(&skills_dir)?;
-    let dest_path = skills_dir.join(format!("{}.toml", repo));
-    std::fs::write(&dest_path, content)?;
+    let dest_path = skills_dir.join(format!("{}.toml", save_filename));
+    std::fs::write(&dest_path, skill_toml)?;
 
-    Ok(repo.to_string())
+    Ok(name)
+}
+
+fn parse_skill_markdown(content: &str) -> Result<(String, String, String)> {
+    let parts: Vec<&str> = content.split("---").collect();
+    if parts.len() < 3 {
+        return Err(anyhow!("Missing YAML frontmatter in SKILL.md"));
+    }
+    
+    let frontmatter = parts[1];
+    let body = parts[2..].join("---");
+
+    let mut name = String::new();
+    let mut description = String::new();
+
+    for line in frontmatter.lines() {
+        let line = line.trim();
+        if line.starts_with("name:") {
+            name = line["name:".len()..].trim().trim_matches('"').to_string();
+        } else if line.starts_with("description:") {
+            description = line["description:".len()..].trim().trim_matches('"').to_string();
+        }
+    }
+
+    if name.is_empty() {
+        return Err(anyhow!("Missing 'name' field in frontmatter"));
+    }
+
+    Ok((name, description, body.trim().to_string()))
 }
 
