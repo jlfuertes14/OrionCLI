@@ -1,44 +1,10 @@
 use std::path::PathBuf;
-use rustyline::error::ReadlineError;
-use rustyline::{Editor, Helper};
-use rustyline::completion::Completer;
-use rustyline::hint::Hinter;
-use rustyline::highlight::Highlighter;
-use rustyline::validate::Validator;
-use rustyline::history::DefaultHistory;
-use std::borrow::Cow;
+use anyhow::Result;
 use colored::Colorize;
 use crate::config::Settings;
 use crate::cli::theme::{self, format_user_prompt};
 use crate::cli::command_picker;
-
-struct OrionHelper;
-
-impl Helper for OrionHelper {}
-
-impl Completer for OrionHelper {
-    type Candidate = String;
-}
-
-impl Hinter for OrionHelper {
-    type Hint = String;
-}
-
-impl Highlighter for OrionHelper {
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
-        &'s self,
-        prompt: &'p str,
-        default: bool,
-    ) -> Cow<'b, str> {
-        if default && prompt == "❯ " {
-            Cow::Owned(format!("{}", "❯ ".bold().truecolor(76, 175, 80)))
-        } else {
-            Cow::Borrowed(prompt)
-        }
-    }
-}
-
-impl Validator for OrionHelper {}
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 
 pub struct Repl {
     settings: Settings,
@@ -56,23 +22,208 @@ impl Repl {
         }
     }
 
-    pub async fn start(&mut self) -> rustyline::Result<()> {
-        theme::print_logo(&self.settings.active_model, &self.settings.active_provider);
+    async fn read_line_custom(&mut self, prompt: &str) -> Result<Option<String>> {
+        use crossterm::style::Print;
+        use crossterm::terminal::{self, ClearType};
+        use crossterm::{execute, event};
+        use std::io::{self, Write};
 
-        let mut rl = Editor::<OrionHelper, DefaultHistory>::new()?;
-        rl.set_helper(Some(OrionHelper));
+        let mut line = String::new();
+        let mut history_list = Vec::new();
+
+        if let Some(ref path) = self.history_path {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                history_list = content.lines().map(|s| s.to_string()).collect();
+            }
+        }
+        let mut history_index = history_list.len();
+
+        terminal::enable_raw_mode()?;
+        let mut stdout = io::stdout();
+
+        execute!(stdout, Print(prompt))?;
+        stdout.flush()?;
+
+        let result = loop {
+            if let Event::Key(key) = event::read()? {
+                match (key.code, key.modifiers) {
+                    (KeyCode::Enter, _) => {
+                        execute!(stdout, Print("\r\n"))?;
+                        stdout.flush()?;
+                        break Some(line);
+                    }
+                    (KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        execute!(stdout, Print("\r\n"))?;
+                        stdout.flush()?;
+                        break None;
+                    }
+                    (KeyCode::Backspace, _) => {
+                        if !line.is_empty() {
+                            line.pop();
+                            execute!(
+                                stdout,
+                                Print("\r"),
+                                terminal::Clear(ClearType::CurrentLine),
+                                Print(prompt),
+                                Print(&line)
+                            )?;
+                            stdout.flush()?;
+                        }
+                    }
+                    (KeyCode::Up, _) => {
+                        if history_index > 0 {
+                            history_index -= 1;
+                            if let Some(hist) = history_list.get(history_index) {
+                                line = hist.clone();
+                                execute!(
+                                    stdout,
+                                    Print("\r"),
+                                    terminal::Clear(ClearType::CurrentLine),
+                                    Print(prompt),
+                                    Print(&line)
+                                )?;
+                                stdout.flush()?;
+                            }
+                        }
+                    }
+                    (KeyCode::Down, _) => {
+                        if history_index + 1 < history_list.len() {
+                            history_index += 1;
+                            if let Some(hist) = history_list.get(history_index) {
+                                line = hist.clone();
+                            }
+                        } else {
+                            history_index = history_list.len();
+                            line.clear();
+                        }
+                        execute!(
+                            stdout,
+                            Print("\r"),
+                            terminal::Clear(ClearType::CurrentLine),
+                            Print(prompt),
+                            Print(&line)
+                        )?;
+                        stdout.flush()?;
+                    }
+                    (KeyCode::Char(c), _) => {
+                        if line.is_empty() && c == '/' {
+                            terminal::disable_raw_mode()?;
+                            println!();
+                            if let Some(selected) = command_picker::run_picker()? {
+                                terminal::enable_raw_mode()?;
+                                line = selected;
+                                execute!(
+                                    stdout,
+                                    Print("\r"),
+                                    terminal::Clear(ClearType::CurrentLine),
+                                    Print(prompt),
+                                    Print(&line)
+                                )?;
+                                stdout.flush()?;
+                            } else {
+                                terminal::enable_raw_mode()?;
+                                execute!(
+                                    stdout,
+                                    Print("\r"),
+                                    terminal::Clear(ClearType::CurrentLine),
+                                    Print(prompt)
+                                )?;
+                                stdout.flush()?;
+                            }
+                        } else if line.is_empty() && c == '.' {
+                            terminal::disable_raw_mode()?;
+                            println!();
+                            let _ = self.skill_registry.scan_skills_dir();
+                            if let Some(selected) = command_picker::run_skills_picker(&mut self.skill_registry)? {
+                                terminal::enable_raw_mode()?;
+                                line = format!("/skill load {}", selected);
+                                execute!(
+                                    stdout,
+                                    Print("\r"),
+                                    terminal::Clear(ClearType::CurrentLine),
+                                    Print(prompt),
+                                    Print(&line)
+                                )?;
+                                stdout.flush()?;
+                            } else {
+                                terminal::enable_raw_mode()?;
+                                execute!(
+                                    stdout,
+                                    Print("\r"),
+                                    terminal::Clear(ClearType::CurrentLine),
+                                    Print(prompt)
+                                )?;
+                                stdout.flush()?;
+                            }
+                        } else {
+                            line.push(c);
+                            if line == "/skill load " {
+                                terminal::disable_raw_mode()?;
+                                println!();
+                                let _ = self.skill_registry.scan_skills_dir();
+                                if let Some(selected) = command_picker::run_skills_picker(&mut self.skill_registry)? {
+                                    terminal::enable_raw_mode()?;
+                                    line = format!("/skill load {}", selected);
+                                    execute!(
+                                        stdout,
+                                        Print("\r"),
+                                        terminal::Clear(ClearType::CurrentLine),
+                                        Print(prompt),
+                                        Print(&line)
+                                    )?;
+                                    stdout.flush()?;
+                                } else {
+                                    terminal::enable_raw_mode()?;
+                                    execute!(
+                                        stdout,
+                                        Print("\r"),
+                                        terminal::Clear(ClearType::CurrentLine),
+                                        Print(prompt),
+                                        Print(&line)
+                                    )?;
+                                    stdout.flush()?;
+                                }
+                            } else {
+                                execute!(stdout, Print(c))?;
+                                stdout.flush()?;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        terminal::disable_raw_mode()?;
+
+        if let Some(ref text) = result {
+            if !text.trim().is_empty() {
+                if let Some(ref path) = self.history_path {
+                    let mut history_entries = history_list.clone();
+                    history_entries.push(text.clone());
+                    if history_entries.len() > 1000 {
+                        history_entries.remove(0);
+                    }
+                    let _ = std::fs::write(path, history_entries.join("\n"));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    pub async fn start(&mut self) -> Result<()> {
+        theme::print_logo(&self.settings.active_model, &self.settings.active_provider);
 
         if let Some(ref path) = self.history_path {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            let _ = rl.load_history(path);
         }
 
         let mut orchestrator = crate::agent::AgentOrchestrator::new(self.settings.clone());
         let _ = orchestrator.initialize_mcp().await;
 
-        // Print the hint once at startup
         println!(
             "  {} Type {} for commands, {} to quit\n",
             "tip:".truecolor(107, 114, 128),
@@ -81,46 +232,13 @@ impl Repl {
         );
 
         loop {
-            let readline = rl.readline(&format_user_prompt());
-            match readline {
-                Ok(line) => {
+            let prompt = format_user_prompt();
+            match self.read_line_custom(&prompt).await {
+                Ok(Some(line)) => {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         continue;
                     }
-
-                    // If user typed exactly "/" (just a slash), open the picker
-                    if trimmed == "/" {
-                        // Move to next line so picker renders below the prompt
-                        println!();
-                        match command_picker::run_picker() {
-                            Ok(Some(cmd)) => {
-                                // Echo the selected command and execute it
-                                println!(
-                                    "{}",
-                                    format!("❯ {}", cmd).truecolor(99, 179, 237)
-                                );
-                                let _ = rl.add_history_entry(&cmd);
-                                let (should_exit, settings_changed) =
-                                    self.handle_slash_command(&cmd, &mut orchestrator).await;
-                                if settings_changed {
-                                    orchestrator.update_settings(self.settings.clone());
-                                }
-                                if should_exit {
-                                    break;
-                                }
-                            }
-                            Ok(None) => {
-                                // Cancelled — just continue
-                            }
-                            Err(e) => {
-                                theme::print_error(&format!("Picker error: {}", e));
-                            }
-                        }
-                        continue;
-                    }
-
-                    let _ = rl.add_history_entry(trimmed);
 
                     if trimmed.starts_with('/') {
                         let (should_exit, settings_changed) = self.handle_slash_command(trimmed, &mut orchestrator).await;
@@ -136,23 +254,15 @@ impl Repl {
                         }
                     }
                 }
-                Err(ReadlineError::Interrupted) => {
+                Ok(None) => {
                     theme::print_info("Session interrupted. Goodbye!");
                     break;
                 }
-                Err(ReadlineError::Eof) => {
-                    theme::print_info("EOF received. Exiting.");
-                    break;
-                }
                 Err(err) => {
-                    theme::print_error(&format!("Readline error: {:?}", err));
+                    theme::print_error(&format!("Terminal error: {:?}", err));
                     break;
                 }
             }
-        }
-
-        if let Some(ref path) = self.history_path {
-            let _ = rl.save_history(path);
         }
 
         Ok(())

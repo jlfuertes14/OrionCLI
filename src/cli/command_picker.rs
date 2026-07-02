@@ -17,6 +17,9 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     Command { name: "/help",    icon: "💡", description: "Show all available commands" },
     Command { name: "/model",   icon: "⚡", description: "Switch AI provider and model  e.g. /model anthropic:claude-opus-4-5" },
+    Command { name: "/skill",   icon: "🛠 ", description: "Load/list skills: /skill load <name> or /skill list" },
+    Command { name: "/vision",  icon: "🖼 ", description: "Load local image: /vision <file_path>" },
+    Command { name: "/screenshot", icon: "📸", description: "Capture desktop screenshot and load" },
     Command { name: "/clear",   icon: "🗑 ", description: "Clear the terminal screen" },
     Command { name: "/exit",    icon: "✕ ", description: "Quit Orion" },
 ];
@@ -235,3 +238,182 @@ fn clear_picker(stdout: &mut io::Stdout, lines: usize) -> io::Result<()> {
     stdout.flush()?;
     Ok(())
 }
+
+pub fn run_skills_picker(registry: &mut crate::skills::SkillRegistry) -> io::Result<Option<String>> {
+    let mut query = String::new();
+    let mut selected: usize = 0;
+
+    terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+
+    let result = loop {
+        let list = registry.list();
+        let filtered: Vec<&crate::skills::Skill> = list
+            .into_iter()
+            .filter(|s| {
+                s.skill.name.to_lowercase().contains(&query.to_lowercase())
+                    || s.skill.description.to_lowercase().contains(&query.to_lowercase())
+            })
+            .collect();
+
+        if selected >= filtered.len() && !filtered.is_empty() {
+            selected = filtered.len() - 1;
+        }
+
+        render_skills(&mut stdout, &query, &filtered, selected)?;
+
+        if let Event::Key(key) = event::read()? {
+            match (key.code, key.modifiers) {
+                (KeyCode::Esc, _) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    break None;
+                }
+                (KeyCode::Enter, _) => {
+                    if let Some(skill) = filtered.get(selected) {
+                        break Some(skill.skill.name.clone());
+                    } else {
+                        break Some(query);
+                    }
+                }
+                (KeyCode::Down, _) | (KeyCode::Tab, _) => {
+                    if !filtered.is_empty() {
+                        selected = (selected + 1) % filtered.len();
+                    }
+                }
+                (KeyCode::Up, _) => {
+                    if !filtered.is_empty() {
+                        selected = (selected + filtered.len() - 1) % filtered.len();
+                    }
+                }
+                (KeyCode::Backspace, _) => {
+                    query.pop();
+                    selected = 0;
+                }
+                (KeyCode::Char(c), _) => {
+                    query.push(c);
+                    selected = 0;
+                }
+                _ => {}
+            }
+        }
+    };
+
+    terminal::disable_raw_mode()?;
+    clear_picker(&mut stdout, registry.list().len() + 4)?;
+
+    Ok(result)
+}
+
+fn render_skills(
+    stdout: &mut io::Stdout,
+    query: &str,
+    filtered: &[&crate::skills::Skill],
+    selected: usize,
+) -> io::Result<()> {
+    execute!(stdout, cursor::SavePosition)?;
+    execute!(stdout, terminal::Clear(ClearType::FromCursorDown))?;
+
+    let max_name_len = 16usize;
+    let total_width = 56usize;
+
+    // Top border
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+        Print(format!("╭{}╮\r\n", "─".repeat(total_width))),
+        ResetColor,
+    )?;
+
+    if filtered.is_empty() {
+        execute!(
+            stdout,
+            SetForegroundColor(Color::Rgb { r: 107, g: 114, b: 128 }),
+            Print(format!("│  {:<width$}│\r\n", "No matching skills", width = total_width - 2)),
+            ResetColor,
+        )?;
+    } else {
+        for (i, skill) in filtered.iter().enumerate() {
+            let is_selected = i == selected;
+            let icon = "🛠 ";
+            let name_col = format!("{} {:<width$}", icon, skill.skill.name, width = max_name_len);
+            let desc_col_max = total_width - max_name_len - 6;
+            let desc = if skill.skill.description.len() > desc_col_max {
+                format!("{}…", &skill.skill.description[..desc_col_max.saturating_sub(1)])
+            } else {
+                skill.skill.description.to_string()
+            };
+
+            if is_selected {
+                execute!(
+                    stdout,
+                    SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+                    Print("│"),
+                    SetForegroundColor(Color::Rgb { r: 99, g: 179, b: 237 }),
+                    Print("▌"),
+                    SetBackgroundColor(Color::Rgb { r: 17, g: 24, b: 39 }),
+                    SetForegroundColor(Color::Rgb { r: 99, g: 179, b: 237 }),
+                    SetAttribute(Attribute::Bold),
+                    Print(format!(" {:<width$}", name_col, width = max_name_len + 4)),
+                    SetAttribute(Attribute::Reset),
+                    SetForegroundColor(Color::Rgb { r: 209, g: 213, b: 219 }),
+                    Print(format!("{:<width$}", desc, width = desc_col_max)),
+                    ResetColor,
+                    SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+                    Print("│\r\n"),
+                    ResetColor,
+                )?;
+            } else {
+                execute!(
+                    stdout,
+                    SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+                    Print("│ "),
+                    SetForegroundColor(Color::Rgb { r: 94, g: 234, b: 212 }),
+                    Print(format!("{:<width$}", name_col, width = max_name_len + 4)),
+                    SetForegroundColor(Color::Rgb { r: 107, g: 114, b: 128 }),
+                    Print(format!("{:<width$}", desc, width = desc_col_max)),
+                    SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+                    Print("│\r\n"),
+                    ResetColor,
+                )?;
+            }
+        }
+    }
+
+    // Bottom border
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+        Print(format!("├{}┤\r\n", "─".repeat(total_width))),
+        ResetColor,
+    )?;
+
+    // Input row
+    let display_query = format!("Skill: {}", query);
+    let hint = "↑↓ navigate  ↵ load  esc cancel";
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+        Print("│"),
+        SetForegroundColor(Color::Rgb { r: 99, g: 179, b: 237 }),
+        Print(format!(" {:}", display_query)),
+        SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+        Print(format!(
+            "{:>width$}",
+            hint,
+            width = total_width - display_query.len() - 1
+        )),
+        Print("│\r\n"),
+        ResetColor,
+    )?;
+
+    // Close border
+    execute!(
+        stdout,
+        SetForegroundColor(Color::Rgb { r: 55, g: 65, b: 81 }),
+        Print(format!("╰{}╯\r\n", "─".repeat(total_width))),
+        ResetColor,
+    )?;
+
+    stdout.flush()?;
+    Ok(())
+}
+
