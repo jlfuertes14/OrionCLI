@@ -1,6 +1,6 @@
 # Orion
 
-[![npm version](https://img.shields.io/npm/v/@jlfuertes14/orion-agent-cli.svg)](https://www.npmjs.com/package/@jlfuertes14/orion-agent-cli)
+[![npm version](https://img.shields.io/npm/v/@chiro14/orion-agent-cli.svg)](https://www.npmjs.com/package/@chiro14/orion-agent-cli)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -53,7 +53,7 @@ Core capabilities:
 The recommended end-user install is the NPM package. It installs a small JavaScript launcher plus the matching native binary package for your platform.
 
 ```bash
-npm install -g @jlfuertes14/orion-agent-cli
+npm install -g @chiro14/orion-agent-cli
 orion --help
 ```
 

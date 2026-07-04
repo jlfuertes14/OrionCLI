@@ -60,8 +60,8 @@ strip = true
 opt-level = "z"
 
 [package.metadata.npm]
-name = "@jlfuertes14/orion-agent-cli"
-prefix = "@jlfuertes14/orion-agent-cli-"
+name = "@chiro14/orion-agent-cli"
+prefix = "@chiro14/orion-agent-cli-"
 targets = [
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu",
