@@ -24,3 +24,7 @@ Thumbs.db
 # Generated NPM packages directory
 /npm/
 
+# Local built binaries
+/orion.exe
+/orion
+
