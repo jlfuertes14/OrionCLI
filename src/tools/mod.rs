@@ -1,13 +1,14 @@
-use std::collections::HashMap;
-use serde_json::Value;
-use anyhow::Result;
 use crate::config::Settings;
+use anyhow::Result;
+use serde_json::Value;
+use std::collections::HashMap;
 
-pub mod filesystem;
-pub mod terminal;
-pub mod grep;
-pub mod git;
 pub mod browser;
+pub mod custom;
+pub mod filesystem;
+pub mod git;
+pub mod grep;
+pub mod terminal;
 
 pub struct ToolContext {
     pub settings: Settings,
@@ -41,6 +42,7 @@ impl ToolRegistry {
             tools: HashMap::new(),
         };
         registry.register_defaults();
+        registry.register_custom_tools();
         registry
     }
 
@@ -62,12 +64,38 @@ impl ToolRegistry {
         self.register(git::GitStatusTool);
         self.register(git::GitDiffTool);
         self.register(git::GitCommitTool);
+        self.register(git::GitExecuteTool);
 
         // Delegation
         self.register(crate::multi_agent::DelegateTaskTool);
+        self.register(crate::multi_agent::ParallelAgentsTool);
 
         // Browser
         self.register(browser::BrowserReadTool);
+        self.register(browser::WebSearchTool);
+        self.register(browser::OpenBrowserTool);
+        self.register(browser::PlayYoutubeTool);
+    }
+
+    fn register_custom_tools(&mut self) {
+        if let Some(mut dir) = dirs::home_dir() {
+            dir.push(".orion");
+            dir.push("tools");
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("json") {
+                        if let Ok(contents) = std::fs::read_to_string(&path) {
+                            if let Ok(def) =
+                                serde_json::from_str::<custom::CustomToolDef>(&contents)
+                            {
+                                self.register(custom::CustomScriptTool::new(def));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub fn register<T: Tool + 'static>(&mut self, tool: T) {
@@ -86,15 +114,18 @@ impl ToolRegistry {
 
     /// Serializes registered tool definitions into OpenAI API tools array
     pub fn get_openai_schemas(&self) -> Vec<Value> {
-        self.tools.values().map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": t.name(),
-                    "description": t.description(),
-                    "parameters": t.parameters_schema(),
-                }
+        self.tools
+            .values()
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name(),
+                        "description": t.description(),
+                        "parameters": t.parameters_schema(),
+                    }
+                })
             })
-        }).collect()
+            .collect()
     }
 }

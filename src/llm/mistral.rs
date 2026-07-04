@@ -1,5 +1,5 @@
 use crate::llm::openai::OpenAiProvider;
-use crate::llm::provider::{LlmProvider, ChatRequest, ChatResponse, BoxedStream};
+use crate::llm::provider::{BoxedStream, ChatRequest, ChatResponse, LlmProvider};
 use anyhow::Result;
 
 pub struct MistralProvider {

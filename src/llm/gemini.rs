@@ -1,9 +1,12 @@
+use crate::llm::provider::{
+    BoxedStream, ChatRequest, ChatResponse, FunctionCall, LlmProvider, Message, StreamChunk,
+    ToolCall,
+};
+use anyhow::{anyhow, Result};
+use futures::StreamExt;
 use reqwest::Client;
 use serde_json::{json, Value};
-use anyhow::{Result, anyhow};
-use futures::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use crate::llm::provider::{LlmProvider, ChatRequest, ChatResponse, BoxedStream, StreamChunk, Message, ToolCall, FunctionCall};
 
 pub struct GeminiProvider {
     client: Client,
@@ -51,7 +54,8 @@ impl GeminiProvider {
                     parts.push(json!({ "text": m.content }));
                 }
                 for call in tc {
-                    let args_val: Value = serde_json::from_str(&call.function.arguments).unwrap_or(json!({}));
+                    let args_val: Value =
+                        serde_json::from_str(&call.function.arguments).unwrap_or(json!({}));
                     parts.push(json!({
                         "functionCall": {
                             "name": call.function.name,
@@ -61,6 +65,17 @@ impl GeminiProvider {
                 }
             } else {
                 parts.push(json!({ "text": m.content }));
+            }
+
+            if let Some(ref imgs) = m.images {
+                for img in imgs {
+                    parts.push(json!({
+                        "inlineData": {
+                            "mimeType": img.media_type,
+                            "data": img.data,
+                        }
+                    }));
+                }
             }
 
             contents.push(json!({
@@ -73,14 +88,17 @@ impl GeminiProvider {
     }
 
     fn map_tools(&self, tools: &[Value]) -> Value {
-        let decls: Vec<Value> = tools.iter().map(|t| {
-            let func = &t["function"];
-            json!({
-                "name": func["name"],
-                "description": func["description"],
-                "parameters": func["parameters"],
+        let decls: Vec<Value> = tools
+            .iter()
+            .map(|t| {
+                let func = &t["function"];
+                json!({
+                    "name": func["name"],
+                    "description": func["description"],
+                    "parameters": func["parameters"],
+                })
             })
-        }).collect();
+            .collect();
 
         json!([{ "functionDeclarations": decls }])
     }
@@ -106,16 +124,17 @@ impl LlmProvider for GeminiProvider {
             }
         }
 
-        let model_clean = if model.contains('/') { model.to_string() } else { format!("models/{}", model) };
+        let model_clean = if model.contains('/') {
+            model.to_string()
+        } else {
+            format!("models/{}", model)
+        };
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/{}:generateContent?key={}",
             model_clean, self.api_key
         );
 
-        let resp = self.client.post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -135,11 +154,16 @@ impl LlmProvider for GeminiProvider {
                 if let Some(txt) = part["text"].as_str() {
                     content = Some(txt.to_string());
                 } else if let Some(fc) = part["functionCall"].as_object() {
-                    let name = fc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = fc
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let default_args = json!({});
                     let args_val = fc.get("args").unwrap_or(&default_args);
-                    let arguments = serde_json::to_string(args_val).unwrap_or_else(|_| "{}".to_string());
-                    
+                    let arguments =
+                        serde_json::to_string(args_val).unwrap_or_else(|_| "{}".to_string());
+
                     tool_calls.push(ToolCall {
                         id: uuid::Uuid::new_v4().to_string(), // Gemini doesn't always supply a distinct ID; generate one
                         r#type: "function".to_string(),
@@ -149,10 +173,18 @@ impl LlmProvider for GeminiProvider {
             }
         }
 
-        let final_tool_calls = if tool_calls.is_empty() { None } else { Some(tool_calls) };
+        let final_tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
 
         Ok(ChatResponse {
-            role: if role == "model" { "assistant".to_string() } else { role },
+            role: if role == "model" {
+                "assistant".to_string()
+            } else {
+                role
+            },
             content,
             tool_calls: final_tool_calls,
         })
@@ -176,21 +208,26 @@ impl LlmProvider for GeminiProvider {
             }
         }
 
-        let model_clean = if model.contains('/') { model.to_string() } else { format!("models/{}", model) };
+        let model_clean = if model.contains('/') {
+            model.to_string()
+        } else {
+            format!("models/{}", model)
+        };
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/{}:streamGenerateContent?key={}",
             model_clean, self.api_key
         );
 
-        let resp = self.client.post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.client.post(&url).json(&body).send().await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let err_txt = resp.text().await?;
-            return Err(anyhow!("Gemini streaming API error ({}): {}", status, err_txt));
+            return Err(anyhow!(
+                "Gemini streaming API error ({}): {}",
+                status,
+                err_txt
+            ));
         }
 
         let mut stream = resp.bytes_stream();
@@ -226,23 +263,44 @@ impl LlmProvider for GeminiProvider {
 
                                 if !line.is_empty() {
                                     if let Ok(parsed) = serde_json::from_str::<Value>(&line) {
-                                        if let Some(candidate) = parsed["candidates"].as_array().and_then(|a| a.first()) {
-                                            if let Some(parts) = candidate["content"]["parts"].as_array() {
+                                        if let Some(candidate) =
+                                            parsed["candidates"].as_array().and_then(|a| a.first())
+                                        {
+                                            if let Some(parts) =
+                                                candidate["content"]["parts"].as_array()
+                                            {
                                                 for part in parts {
                                                     if let Some(txt) = part["text"].as_str() {
-                                                        let _ = tx.send(Ok(StreamChunk::Content(txt.to_string()))).await;
+                                                        let _ = tx
+                                                            .send(Ok(StreamChunk::Content(
+                                                                txt.to_string(),
+                                                            )))
+                                                            .await;
                                                     }
-                                                    if let Some(fc) = part["functionCall"].as_object() {
-                                                        let name = fc.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                                    if let Some(fc) =
+                                                        part["functionCall"].as_object()
+                                                    {
+                                                        let name = fc
+                                                            .get("name")
+                                                            .and_then(|v| v.as_str())
+                                                            .map(|s| s.to_string());
                                                         let default_args = json!({});
-                                                        let args_val = fc.get("args").unwrap_or(&default_args);
-                                                        let args_str = serde_json::to_string(args_val).unwrap_or_default();
-                                                        let _ = tx.send(Ok(StreamChunk::ToolCallChunk {
-                                                            index: 0,
-                                                            id: Some(uuid::Uuid::new_v4().to_string()),
-                                                            name,
-                                                            arguments: Some(args_str),
-                                                        })).await;
+                                                        let args_val =
+                                                            fc.get("args").unwrap_or(&default_args);
+                                                        let args_str =
+                                                            serde_json::to_string(args_val)
+                                                                .unwrap_or_default();
+                                                        let _ = tx
+                                                            .send(Ok(StreamChunk::ToolCallChunk {
+                                                                index: 0,
+                                                                id: Some(
+                                                                    uuid::Uuid::new_v4()
+                                                                        .to_string(),
+                                                                ),
+                                                                name,
+                                                                arguments: Some(args_str),
+                                                            }))
+                                                            .await;
                                                     }
                                                 }
                                             }

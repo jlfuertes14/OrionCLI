@@ -6,6 +6,7 @@ orion-target/
 # Environment / secrets
 .env
 *.env.local
+.env.example
 
 # Editor
 .vscode/
@@ -19,3 +20,7 @@ Thumbs.db
 
 # Cargo lock for binaries (keep for libraries)
 # Cargo.lock  ← keep this committed for a binary crate
+
+# Generated NPM packages directory
+/npm/
+

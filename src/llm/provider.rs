@@ -1,8 +1,14 @@
-use std::pin::Pin;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use anyhow::Result;
+use std::pin::Pin;
 use tokio_stream::Stream;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageContent {
+    pub media_type: String, // e.g. "image/png"
+    pub data: String,       // base64 data
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -14,6 +20,8 @@ pub struct Message {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<ImageContent>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +37,7 @@ pub struct FunctionCall {
     pub arguments: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
     pub tools: Option<Vec<Value>>,

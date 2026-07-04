@@ -1,7 +1,7 @@
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use anyhow::{Result, anyhow};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillInfo {
@@ -73,6 +73,27 @@ to gather information from multiple sources before answering.
                 }
             }
         }
+
+        // Scan .agents/skills for npx skills ecosystem compatibility
+        if let Some(home) = dirs::home_dir() {
+            let agents_skills_dir = home.join(".agents").join("skills");
+            if let Ok(entries) = fs::read_dir(agents_skills_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let skill_md_path = path.join("SKILL.md");
+                        if skill_md_path.exists() {
+                            if let Ok(content) = fs::read_to_string(&skill_md_path) {
+                                if let Some(skill) = parse_skill_md(&content) {
+                                    self.skills.insert(skill.skill.name.clone(), skill);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -100,7 +121,10 @@ pub async fn download_skill(github_repo: &str) -> Result<Vec<String>> {
     let mut downloaded_names = Vec::new();
 
     // 1. Try fetching the /skills directory contents via GitHub API
-    let api_url = format!("https://api.github.com/repos/{}/{}/contents/skills", owner, repo);
+    let api_url = format!(
+        "https://api.github.com/repos/{}/{}/contents/skills",
+        owner, repo
+    );
     let resp = client.get(&api_url).send().await?;
 
     if resp.status().is_success() {
@@ -109,7 +133,15 @@ pub async fn download_skill(github_repo: &str) -> Result<Vec<String>> {
                 if item.get("type").and_then(|t| t.as_str()) == Some("dir") {
                     if let Some(dir_name) = item.get("name").and_then(|n| n.as_str()) {
                         // Attempt to fetch SKILL.md from this directory
-                        match fetch_and_save_skill(&client, owner, repo, &format!("skills/{}", dir_name), dir_name).await {
+                        match fetch_and_save_skill(
+                            &client,
+                            owner,
+                            repo,
+                            &format!("skills/{}", dir_name),
+                            dir_name,
+                        )
+                        .await
+                        {
                             Ok(name) => downloaded_names.push(name),
                             Err(_) => {} // skip if no SKILL.md in this folder
                         }
@@ -124,7 +156,10 @@ pub async fn download_skill(github_repo: &str) -> Result<Vec<String>> {
         match fetch_and_save_skill(&client, owner, repo, "", repo).await {
             Ok(name) => downloaded_names.push(name),
             Err(e) => {
-                return Err(anyhow!("Could not find SKILL.md in root or /skills/ subdirectories: {}", e));
+                return Err(anyhow!(
+                    "Could not find SKILL.md in root or /skills/ subdirectories: {}",
+                    e
+                ));
             }
         }
     }
@@ -146,17 +181,26 @@ async fn fetch_and_save_skill(
     };
 
     // Try main branch first
-    let mut url = format!("https://raw.githubusercontent.com/{}/{}/main/{}", owner, repo, path_part);
+    let mut url = format!(
+        "https://raw.githubusercontent.com/{}/{}/main/{}",
+        owner, repo, path_part
+    );
     let mut resp = client.get(&url).send().await?;
 
     if !resp.status().is_success() {
         // Try master branch fallback
-        url = format!("https://raw.githubusercontent.com/{}/{}/master/{}", owner, repo, path_part);
+        url = format!(
+            "https://raw.githubusercontent.com/{}/{}/master/{}",
+            owner, repo, path_part
+        );
         resp = client.get(&url).send().await?;
     }
 
     if !resp.status().is_success() {
-        return Err(anyhow!("SKILL.md not found in branch (HTTP {})", resp.status()));
+        return Err(anyhow!(
+            "SKILL.md not found in branch (HTTP {})",
+            resp.status()
+        ));
     }
 
     let content = resp.text().await?;
@@ -196,7 +240,7 @@ fn parse_skill_markdown(content: &str) -> Result<(String, String, String)> {
     if parts.len() < 3 {
         return Err(anyhow!("Missing YAML frontmatter in SKILL.md"));
     }
-    
+
     let frontmatter = parts[1];
     let body = parts[2..].join("---");
 
@@ -208,7 +252,10 @@ fn parse_skill_markdown(content: &str) -> Result<(String, String, String)> {
         if line.starts_with("name:") {
             name = line["name:".len()..].trim().trim_matches('"').to_string();
         } else if line.starts_with("description:") {
-            description = line["description:".len()..].trim().trim_matches('"').to_string();
+            description = line["description:".len()..]
+                .trim()
+                .trim_matches('"')
+                .to_string();
         }
     }
 
@@ -219,3 +266,18 @@ fn parse_skill_markdown(content: &str) -> Result<(String, String, String)> {
     Ok((name, description, body.trim().to_string()))
 }
 
+fn parse_skill_md(content: &str) -> Option<Skill> {
+    if let Ok((name, description, inject)) = parse_skill_markdown(content) {
+        Some(Skill {
+            skill: SkillInfo {
+                name,
+                description,
+                version: "1.0".to_string(),
+            },
+            prompt: SkillPrompt { inject },
+            aliases: None,
+        })
+    } else {
+        None
+    }
+}

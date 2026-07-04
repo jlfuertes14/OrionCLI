@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::Path;
-use serde_json::{json, Value};
-use anyhow::{Result, anyhow};
 use crate::sandbox::validate_path;
 use crate::tools::{Tool, ToolContext};
+use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
+use std::fs;
+use std::path::Path;
 
 pub struct GrepSearchTool;
 
@@ -39,9 +39,13 @@ impl Tool for GrepSearchTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let query = args["query"].as_str().ok_or_else(|| anyhow!("Missing 'query' argument"))?;
-        let path_str = args["path"].as_str().ok_or_else(|| anyhow!("Missing 'path' argument"))?;
-        
+        let query = args["query"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'query' argument"))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' argument"))?;
+
         let validated = validate_path(path_str, &ctx.settings)?;
         if !validated.is_dir() {
             return Ok(format!("Not a directory: {}", path_str));
@@ -64,12 +68,20 @@ impl Tool for GrepSearchTool {
 
 impl GrepSearchTool {
     fn search_recursive(&self, dir: &Path, query: &str, matches: &mut Vec<String>) -> Result<()> {
-        let ignore_dirs = [".git", "node_modules", "build", "venv", ".venv", "target", ".dart_tool", "__pycache__"];
+        let ignore_dirs = [
+            ".git",
+            "node_modules",
+            "build",
+            "venv",
+            ".venv",
+            "target",
+            ".dart_tool",
+            "__pycache__",
+        ];
         let text_extensions = [
-            ".py", ".js", ".ts", ".tsx", ".jsx", ".md", ".txt", ".json",
-            ".yaml", ".yml", ".toml", ".cfg", ".ini", ".html", ".css",
-            ".dart", ".java", ".kt", ".swift", ".rs", ".go", ".c", ".cpp",
-            ".h", ".hpp", ".rb", ".php", ".sh", ".bat", ".ps1",
+            ".py", ".js", ".ts", ".tsx", ".jsx", ".md", ".txt", ".json", ".yaml", ".yml", ".toml",
+            ".cfg", ".ini", ".html", ".css", ".dart", ".java", ".kt", ".swift", ".rs", ".go", ".c",
+            ".cpp", ".h", ".hpp", ".rb", ".php", ".sh", ".bat", ".ps1",
         ];
 
         if dir.is_dir() {
@@ -87,13 +99,21 @@ impl GrepSearchTool {
                 } else if path.is_file() {
                     let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                     let suffix = format!(".{}", extension);
-                    if text_extensions.iter().any(|&ext| ext == suffix || ext == extension) {
+                    if text_extensions
+                        .iter()
+                        .any(|&ext| ext == suffix || ext == extension)
+                    {
                         if let Ok(content) = fs::read_to_string(&path) {
                             let query_lower = query.to_lowercase();
                             for (line_num, line) in content.lines().enumerate() {
                                 if line.to_lowercase().contains(&query_lower) {
                                     let rel_path = path.to_string_lossy();
-                                    matches.push(format!("{}:{}: {}", rel_path, line_num + 1, line.trim()));
+                                    matches.push(format!(
+                                        "{}:{}: {}",
+                                        rel_path,
+                                        line_num + 1,
+                                        line.trim()
+                                    ));
                                     if matches.len() >= 50 {
                                         return Ok(());
                                     }

@@ -1,9 +1,12 @@
+use crate::llm::provider::{
+    BoxedStream, ChatRequest, ChatResponse, FunctionCall, LlmProvider, Message, StreamChunk,
+    ToolCall,
+};
+use anyhow::{anyhow, Result};
+use futures::StreamExt;
 use reqwest::Client;
 use serde_json::{json, Value};
-use anyhow::{Result, anyhow};
-use futures::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use crate::llm::provider::{LlmProvider, ChatRequest, ChatResponse, BoxedStream, StreamChunk, Message, ToolCall, FunctionCall};
 
 pub struct OllamaProvider {
     client: Client,
@@ -19,23 +22,26 @@ impl OllamaProvider {
     }
 
     fn map_messages(&self, messages: &[Message]) -> Vec<Value> {
-        messages.iter().map(|m| {
-            let mut val = json!({
-                "role": m.role,
-                "content": m.content,
-            });
+        messages
+            .iter()
+            .map(|m| {
+                let mut val = json!({
+                    "role": m.role,
+                    "content": m.content,
+                });
 
-            if let Some(ref tc) = m.tool_calls {
-                val["tool_calls"] = json!(tc);
-            }
-            if let Some(ref t_id) = m.tool_call_id {
-                val["tool_call_id"] = json!(t_id);
-            }
-            if let Some(ref name) = m.name {
-                val["name"] = json!(name);
-            }
-            val
-        }).collect()
+                if let Some(ref tc) = m.tool_calls {
+                    val["tool_calls"] = json!(tc);
+                }
+                if let Some(ref t_id) = m.tool_call_id {
+                    val["tool_call_id"] = json!(t_id);
+                }
+                if let Some(ref name) = m.name {
+                    val["name"] = json!(name);
+                }
+                val
+            })
+            .collect()
     }
 }
 
@@ -55,7 +61,9 @@ impl LlmProvider for OllamaProvider {
             }
         }
 
-        let resp = self.client.post(format!("{}/api/chat", self.base_url))
+        let resp = self
+            .client
+            .post(format!("{}/api/chat", self.base_url))
             .json(&body)
             .send()
             .await?;
@@ -80,7 +88,10 @@ impl LlmProvider for OllamaProvider {
                     r#type: "function".to_string(),
                     function: FunctionCall {
                         name: item["function"]["name"].as_str().unwrap_or("").to_string(),
-                        arguments: item["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
+                        arguments: item["function"]["arguments"]
+                            .as_str()
+                            .unwrap_or("{}")
+                            .to_string(),
                     },
                 });
             }
@@ -89,7 +100,11 @@ impl LlmProvider for OllamaProvider {
             }
         }
 
-        Ok(ChatResponse { role, content, tool_calls })
+        Ok(ChatResponse {
+            role,
+            content,
+            tool_calls,
+        })
     }
 
     async fn stream(&self, req: ChatRequest, model: &str) -> Result<BoxedStream> {
@@ -106,7 +121,9 @@ impl LlmProvider for OllamaProvider {
             }
         }
 
-        let resp = self.client.post(format!("{}/api/chat", self.base_url))
+        let resp = self
+            .client
+            .post(format!("{}/api/chat", self.base_url))
             .json(&body)
             .send()
             .await?;
@@ -136,22 +153,31 @@ impl LlmProvider for OllamaProvider {
                                         let message = &parsed["message"];
                                         // Content chunk
                                         if let Some(content) = message["content"].as_str() {
-                                            let _ = tx.send(Ok(StreamChunk::Content(content.to_string()))).await;
+                                            let _ = tx
+                                                .send(Ok(StreamChunk::Content(content.to_string())))
+                                                .await;
                                         }
                                         // Tool chunk
                                         if let Some(tc_array) = message["tool_calls"].as_array() {
                                             for item in tc_array {
-                                                let index = item["index"].as_u64().unwrap_or(0) as usize;
+                                                let index =
+                                                    item["index"].as_u64().unwrap_or(0) as usize;
                                                 let id = item["id"].as_str().map(|s| s.to_string());
-                                                let name = item["function"]["name"].as_str().map(|s| s.to_string());
-                                                let arguments = item["function"]["arguments"].as_str().map(|s| s.to_string());
+                                                let name = item["function"]["name"]
+                                                    .as_str()
+                                                    .map(|s| s.to_string());
+                                                let arguments = item["function"]["arguments"]
+                                                    .as_str()
+                                                    .map(|s| s.to_string());
 
-                                                let _ = tx.send(Ok(StreamChunk::ToolCallChunk {
-                                                    index,
-                                                    id,
-                                                    name,
-                                                    arguments,
-                                                })).await;
+                                                let _ = tx
+                                                    .send(Ok(StreamChunk::ToolCallChunk {
+                                                        index,
+                                                        id,
+                                                        name,
+                                                        arguments,
+                                                    }))
+                                                    .await;
                                             }
                                         }
                                     }

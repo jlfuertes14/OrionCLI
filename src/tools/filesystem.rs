@@ -1,8 +1,8 @@
-use std::fs;
-use serde_json::{json, Value};
-use anyhow::{Result, anyhow};
 use crate::sandbox::validate_path;
 use crate::tools::{Tool, ToolContext};
+use anyhow::{anyhow, Result};
+use serde_json::{json, Value};
+use std::fs;
 
 pub struct ReadFileTool;
 
@@ -34,7 +34,9 @@ impl Tool for ReadFileTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| anyhow!("Missing 'path' argument"))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' argument"))?;
         let validated = validate_path(path_str, &ctx.settings)?;
 
         if !validated.exists() {
@@ -47,7 +49,11 @@ impl Tool for ReadFileTool {
         let content = fs::read_to_string(&validated)?;
         if content.len() > 50_000 {
             let truncated = &content[..50_000];
-            Ok(format!("{}\n\n... [truncated, file is {} chars total]", truncated, content.len()))
+            Ok(format!(
+                "{}\n\n... [truncated, file is {} chars total]",
+                truncated,
+                content.len()
+            ))
         } else {
             Ok(content)
         }
@@ -88,8 +94,12 @@ impl Tool for WriteFileTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| anyhow!("Missing 'path' argument"))?;
-        let content = args["content"].as_str().ok_or_else(|| anyhow!("Missing 'content' argument"))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' argument"))?;
+        let content = args["content"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'content' argument"))?;
         let validated = validate_path(path_str, &ctx.settings)?;
 
         if let Some(parent) = validated.parent() {
@@ -97,7 +107,11 @@ impl Tool for WriteFileTool {
         }
         fs::write(&validated, content)?;
 
-        Ok(format!("Successfully wrote {} chars to {}", content.len(), path_str))
+        Ok(format!(
+            "Successfully wrote {} chars to {}",
+            content.len(),
+            path_str
+        ))
     }
 }
 
@@ -131,7 +145,9 @@ impl Tool for ListDirectoryTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| anyhow!("Missing 'path' argument"))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' argument"))?;
         let validated = validate_path(path_str, &ctx.settings)?;
 
         if !validated.exists() {
@@ -205,8 +221,12 @@ impl Tool for MoveFileTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let src_str = args["source_path"].as_str().ok_or_else(|| anyhow!("Missing 'source_path' argument"))?;
-        let dst_str = args["destination_path"].as_str().ok_or_else(|| anyhow!("Missing 'destination_path' argument"))?;
+        let src_str = args["source_path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'source_path' argument"))?;
+        let dst_str = args["destination_path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'destination_path' argument"))?;
         let src = validate_path(src_str, &ctx.settings)?;
         let dst = validate_path(dst_str, &ctx.settings)?;
 
@@ -253,7 +273,9 @@ impl Tool for DeleteFileTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<String> {
-        let path_str = args["path"].as_str().ok_or_else(|| anyhow!("Missing 'path' argument"))?;
+        let path_str = args["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' argument"))?;
         let validated = validate_path(path_str, &ctx.settings)?;
 
         if !validated.exists() {
@@ -265,7 +287,10 @@ impl Tool for DeleteFileTool {
             Ok(format!("Successfully deleted file: {}", path_str))
         } else if validated.is_dir() {
             fs::remove_dir(&validated)?;
-            Ok(format!("Successfully deleted empty directory: {}", path_str))
+            Ok(format!(
+                "Successfully deleted empty directory: {}",
+                path_str
+            ))
         } else {
             Err(anyhow!("Unsupported item type for deletion"))
         }

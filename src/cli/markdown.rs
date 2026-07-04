@@ -1,13 +1,31 @@
 use colored::Colorize;
+use std::sync::OnceLock;
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style, ThemeSet};
+use syntect::parsing::SyntaxSet;
+use syntect::util::as_24_bit_terminal_escaped;
+
+static SYNTAX_SET: OnceLock<SyntaxSet> = OnceLock::new();
+static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
+
+fn get_syntax_set() -> &'static SyntaxSet {
+    SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
+}
+
+fn get_theme_set() -> &'static ThemeSet {
+    THEME_SET.get_or_init(ThemeSet::load_defaults)
+}
 
 pub struct MarkdownRenderer {
     in_code_block: bool,
+    highlighter: Option<HighlightLines<'static>>,
 }
 
 impl MarkdownRenderer {
     pub fn new() -> Self {
         MarkdownRenderer {
             in_code_block: false,
+            highlighter: None,
         }
     }
 
@@ -17,17 +35,53 @@ impl MarkdownRenderer {
 
         // Handle code block toggles
         if trimmed.starts_with("```") {
-            self.in_code_block = !self.in_code_block;
             if self.in_code_block {
-                return format!(" {}{}", "┌── CODE ──────────────────────────────────────────".truecolor(100, 100, 100), "\n");
+                self.in_code_block = false;
+                self.highlighter = None;
+                return format!(
+                    " {}{}",
+                    "└──────────────────────────────────────────────────".truecolor(100, 100, 100),
+                    "\n"
+                );
             } else {
-                return format!(" {}{}", "└──────────────────────────────────────────────────".truecolor(100, 100, 100), "\n");
+                self.in_code_block = true;
+                let lang = trimmed[3..].trim();
+                let ps = get_syntax_set();
+                let ts = get_theme_set();
+
+                let syntax = ps
+                    .find_syntax_by_token(lang)
+                    .unwrap_or_else(|| ps.find_syntax_plain_text());
+
+                // base16-ocean.dark is a nice built-in theme
+                let theme = &ts.themes["base16-ocean.dark"];
+                self.highlighter = Some(HighlightLines::new(syntax, theme));
+
+                let lang_display = if lang.is_empty() { "CODE" } else { lang };
+                return format!(
+                    " {}{}",
+                    format!(
+                        "┌── {} ──────────────────────────────────────────",
+                        lang_display
+                    )
+                    .truecolor(100, 100, 100),
+                    "\n"
+                );
             }
         }
 
-        // If we are inside a code block, print in gray/cyan with indentation
+        // If we are inside a code block, format with syntect
         if self.in_code_block {
-            return format!(" {} {}\n", "│".truecolor(100, 100, 100), line.cyan());
+            let highlighted = if let Some(h) = &mut self.highlighter {
+                let line_with_nl = format!("{}\n", line);
+                let ranges: Vec<(Style, &str)> = h
+                    .highlight_line(&line_with_nl, get_syntax_set())
+                    .unwrap_or_default();
+                as_24_bit_terminal_escaped(&ranges[..], false)
+            } else {
+                format!("{}\n", line.cyan())
+            };
+            return format!(" {} {}", "│".truecolor(100, 100, 100), highlighted);
         }
 
         // Handle Headers

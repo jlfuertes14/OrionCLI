@@ -1,9 +1,12 @@
+use crate::llm::provider::{
+    BoxedStream, ChatRequest, ChatResponse, FunctionCall, LlmProvider, Message, StreamChunk,
+    ToolCall,
+};
+use anyhow::{anyhow, Result};
+use futures::StreamExt;
 use reqwest::Client;
 use serde_json::{json, Value};
-use anyhow::{Result, anyhow};
-use futures::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use crate::llm::provider::{LlmProvider, ChatRequest, ChatResponse, BoxedStream, StreamChunk, Message, ToolCall, FunctionCall};
 
 pub struct AnthropicProvider {
     client: Client,
@@ -51,7 +54,8 @@ impl AnthropicProvider {
                 }
                 for call in tc {
                     // Try parsing arguments as JSON value for Anthropic's input block
-                    let input_val: Value = serde_json::from_str(&call.function.arguments).unwrap_or(json!({}));
+                    let input_val: Value =
+                        serde_json::from_str(&call.function.arguments).unwrap_or(json!({}));
                     content_blocks.push(json!({
                         "type": "tool_use",
                         "id": call.id,
@@ -61,7 +65,25 @@ impl AnthropicProvider {
                 }
                 val["content"] = json!(content_blocks);
             } else {
-                val["content"] = json!(m.content);
+                if let Some(ref imgs) = m.images {
+                    let mut content_blocks = vec![json!({
+                        "type": "text",
+                        "text": m.content,
+                    })];
+                    for img in imgs {
+                        content_blocks.push(json!({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": img.media_type,
+                                "data": img.data,
+                            }
+                        }));
+                    }
+                    val["content"] = json!(content_blocks);
+                } else {
+                    val["content"] = json!(m.content);
+                }
             }
 
             mapped.push(val);
@@ -71,14 +93,17 @@ impl AnthropicProvider {
     }
 
     fn map_tools(&self, tools: &[Value]) -> Vec<Value> {
-        tools.iter().map(|t| {
-            let func = &t["function"];
-            json!({
-                "name": func["name"],
-                "description": func["description"],
-                "input_schema": func["parameters"],
+        tools
+            .iter()
+            .map(|t| {
+                let func = &t["function"];
+                json!({
+                    "name": func["name"],
+                    "description": func["description"],
+                    "input_schema": func["parameters"],
+                })
             })
-        }).collect()
+            .collect()
     }
 }
 
@@ -102,7 +127,9 @@ impl LlmProvider for AnthropicProvider {
             }
         }
 
-        let resp = self.client.post("https://api.anthropic.com/v1/messages")
+        let resp = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
@@ -134,7 +161,8 @@ impl LlmProvider for AnthropicProvider {
                         let id = block["id"].as_str().unwrap_or("").to_string();
                         let name = block["name"].as_str().unwrap_or("").to_string();
                         let input = &block["input"];
-                        let arguments = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
+                        let arguments =
+                            serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
                         tool_calls.push(ToolCall {
                             id,
                             r#type: "function".to_string(),
@@ -146,8 +174,16 @@ impl LlmProvider for AnthropicProvider {
             }
         }
 
-        let final_content = if content.is_empty() { None } else { Some(content) };
-        let final_tool_calls = if tool_calls.is_empty() { None } else { Some(tool_calls) };
+        let final_content = if content.is_empty() {
+            None
+        } else {
+            Some(content)
+        };
+        let final_tool_calls = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
 
         Ok(ChatResponse {
             role,
@@ -175,7 +211,9 @@ impl LlmProvider for AnthropicProvider {
             }
         }
 
-        let resp = self.client.post("https://api.anthropic.com/v1/messages")
+        let resp = self
+            .client
+            .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
@@ -186,7 +224,11 @@ impl LlmProvider for AnthropicProvider {
         if !resp.status().is_success() {
             let status = resp.status();
             let err_txt = resp.text().await?;
-            return Err(anyhow!("Anthropic streaming error ({}): {}", status, err_txt));
+            return Err(anyhow!(
+                "Anthropic streaming error ({}): {}",
+                status,
+                err_txt
+            ));
         }
 
         let mut stream = resp.bytes_stream();
@@ -212,39 +254,60 @@ impl LlmProvider for AnthropicProvider {
                                     if let Ok(data) = serde_json::from_str::<Value>(data_str) {
                                         match event_name.as_str() {
                                             "content_block_delta" => {
-                                                let index = data["index"].as_u64().unwrap_or(0) as usize;
+                                                let index =
+                                                    data["index"].as_u64().unwrap_or(0) as usize;
                                                 let delta = &data["delta"];
                                                 match delta["type"].as_str().unwrap_or("") {
                                                     "text_delta" => {
                                                         if let Some(txt) = delta["text"].as_str() {
-                                                            let _ = tx.send(Ok(StreamChunk::Content(txt.to_string()))).await;
+                                                            let _ = tx
+                                                                .send(Ok(StreamChunk::Content(
+                                                                    txt.to_string(),
+                                                                )))
+                                                                .await;
                                                         }
                                                     }
                                                     "input_json_delta" => {
-                                                        if let Some(json_txt) = delta["partial_json"].as_str() {
-                                                            let _ = tx.send(Ok(StreamChunk::ToolCallChunk {
-                                                                index,
-                                                                id: None,
-                                                                name: None,
-                                                                arguments: Some(json_txt.to_string()),
-                                                            })).await;
+                                                        if let Some(json_txt) =
+                                                            delta["partial_json"].as_str()
+                                                        {
+                                                            let _ = tx
+                                                                .send(Ok(
+                                                                    StreamChunk::ToolCallChunk {
+                                                                        index,
+                                                                        id: None,
+                                                                        name: None,
+                                                                        arguments: Some(
+                                                                            json_txt.to_string(),
+                                                                        ),
+                                                                    },
+                                                                ))
+                                                                .await;
                                                         }
                                                     }
                                                     _ => {}
                                                 }
                                             }
                                             "content_block_start" => {
-                                                let index = data["index"].as_u64().unwrap_or(0) as usize;
+                                                let index =
+                                                    data["index"].as_u64().unwrap_or(0) as usize;
                                                 let block = &data["content_block"];
-                                                if block["type"].as_str().unwrap_or("") == "tool_use" {
-                                                    let id = block["id"].as_str().map(|s| s.to_string());
-                                                    let name = block["name"].as_str().map(|s| s.to_string());
-                                                    let _ = tx.send(Ok(StreamChunk::ToolCallChunk {
-                                                        index,
-                                                        id,
-                                                        name,
-                                                        arguments: None,
-                                                    })).await;
+                                                if block["type"].as_str().unwrap_or("")
+                                                    == "tool_use"
+                                                {
+                                                    let id =
+                                                        block["id"].as_str().map(|s| s.to_string());
+                                                    let name = block["name"]
+                                                        .as_str()
+                                                        .map(|s| s.to_string());
+                                                    let _ = tx
+                                                        .send(Ok(StreamChunk::ToolCallChunk {
+                                                            index,
+                                                            id,
+                                                            name,
+                                                            arguments: None,
+                                                        }))
+                                                        .await;
                                                 }
                                             }
                                             _ => {}
