@@ -128,5 +128,5 @@ jobs:
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
       - name: Publish to NPM
-        run: cargo npm publish
+        run: cargo npm publish -- --access public
 
