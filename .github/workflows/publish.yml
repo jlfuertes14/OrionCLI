@@ -84,6 +84,7 @@ jobs:
         with:
           node-version: 18
           registry-url: 'https://registry.npmjs.org'
+          scope: '@chiro14'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -124,9 +125,12 @@ jobs:
       - name: Generate Packages
         run: cargo npm generate
 
-      - name: Configure NPM Authentication
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+      - name: Verify NPM Authentication
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish to NPM
         run: cargo npm publish -- --access public
-
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
