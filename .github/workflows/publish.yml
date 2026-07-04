@@ -21,7 +21,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             bin_name: orion
-            use_cross: true
+            use_zigbuild: true
           - target: x86_64-apple-darwin
             os: macos-latest
             bin_name: orion
@@ -43,17 +43,23 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Install Zig
+        if: ${{ matrix.use_zigbuild }}
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        if: ${{ matrix.use_zigbuild }}
+        run: pip install cargo-zigbuild
+
       - name: Build Binary (Standard)
-        if: ${{ !matrix.use_cross }}
+        if: ${{ !matrix.use_zigbuild }}
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Install Cross
-        if: ${{ matrix.use_cross }}
-        run: cargo install cross --git https://github.com/cross-rs/cross.git
-
-      - name: Build Binary (Cross)
-        if: ${{ matrix.use_cross }}
-        run: cross build --release --target ${{ matrix.target }}
+      - name: Build Binary (Zigbuild)
+        if: ${{ matrix.use_zigbuild }}
+        run: cargo zigbuild --release --target ${{ matrix.target }}
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
