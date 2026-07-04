@@ -125,12 +125,52 @@ jobs:
       - name: Generate Packages
         run: cargo npm generate
 
-      - name: Verify NPM Authentication
-        run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Patch generated packages to use scoped names
+        run: |
+          SCOPE="@chiro14"
+          NPM_DIR="npm"
+
+          # Patch the main package.json optionalDependencies to use scoped names
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('${NPM_DIR}/orion-agent-cli/package.json', 'utf8'));
+
+            // Rename the package itself
+            pkg.name = '${SCOPE}/orion-agent-cli';
+
+            // Rename optionalDependencies keys
+            const oldDeps = pkg.optionalDependencies || {};
+            const newDeps = {};
+            for (const [key, val] of Object.entries(oldDeps)) {
+              newDeps['${SCOPE}/' + key] = val;
+            }
+            pkg.optionalDependencies = newDeps;
+            fs.writeFileSync('${NPM_DIR}/orion-agent-cli/package.json', JSON.stringify(pkg, null, 2));
+            console.log('Patched main package.json');
+          "
+
+          # Patch bin/orion.js to use scoped require paths
+          for jsfile in "${NPM_DIR}/orion-agent-cli/bin/"*.js; do
+            sed -i "s|require\.resolve('\(orion-agent-cli[^']*\)')|require.resolve('${SCOPE}/\1')|g" "$jsfile"
+            echo "Patched $jsfile"
+          done
+
+          # Rename each platform package.json name to scoped
+          for platform_dir in "${NPM_DIR}"/orion-agent-cli-*/; do
+            pkgfile="${platform_dir}package.json"
+            if [ -f "$pkgfile" ]; then
+              node -e "
+                const fs = require('fs');
+                const pkg = JSON.parse(fs.readFileSync('$pkgfile', 'utf8'));
+                pkg.name = '${SCOPE}/' + pkg.name;
+                fs.writeFileSync('$pkgfile', JSON.stringify(pkg, null, 2));
+                console.log('Patched $pkgfile -> ' + pkg.name);
+              "
+            fi
+          done
 
       - name: Publish to NPM
         run: cargo npm publish -- --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
