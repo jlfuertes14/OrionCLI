@@ -125,7 +125,9 @@ jobs:
         run: cargo npm generate
 
       - name: Configure NPM Authentication
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+          npm whoami
 
       - name: Publish to NPM
         run: cargo npm publish -- --access public
