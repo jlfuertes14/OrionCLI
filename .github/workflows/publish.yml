@@ -34,9 +34,9 @@ jobs:
             lib_name: liborion_core.so
             use_cross: true
 
-          # macos-13 is the last Intel (x86_64) runner
+          # macos-15-intel provides the Intel (x86_64) runner
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             node_file: orion-core.darwin-x64.node
             lib_name: liborion_core.dylib
             macos_target: '13.0'
