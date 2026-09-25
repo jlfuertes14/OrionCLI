@@ -1,6 +1,6 @@
 {
   "name": "orion-cli",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "OrionBot CLI - High-performance agentic coding assistant with TypeScript React Ink UI and Rust core",
   "type": "module",
   "main": "index.js",
