@@ -1,4 +1,4 @@
-name: Publish to NPM & Crates.io
+name: Publish to NPM
 
 on:
   push:
@@ -6,74 +6,8 @@ on:
       - 'v*'
 
 jobs:
-  build-binaries:
-    name: Build - ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            bin_name: orion.exe
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            bin_name: orion
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            bin_name: orion
-            use_zigbuild: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            bin_name: orion
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            bin_name: orion
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Install Zig
-        if: ${{ matrix.use_zigbuild }}
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.13.0
-
-      - name: Install cargo-zigbuild
-        if: ${{ matrix.use_zigbuild }}
-        run: pip install cargo-zigbuild
-
-      - name: Build Binary (Standard)
-        if: ${{ !matrix.use_zigbuild }}
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build Binary (Zigbuild)
-        if: ${{ matrix.use_zigbuild }}
-        run: cargo zigbuild --release --target ${{ matrix.target }}
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.target }}
-          path: |
-            target/${{ matrix.target }}/release/${{ matrix.bin_name }}
-            target/${{ matrix.target }}/release/update_titles.exe
-            target/${{ matrix.target }}/release/update_titles
-          if-no-files-found: ignore
-
   publish-npm:
-    name: Publish NPM Packages
-    needs: build-binaries
+    name: Publish NPM Package
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -82,64 +16,19 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           registry-url: 'https://registry.npmjs.org'
-          scope: '@chiro14'
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install cargo-npm
-        run: cargo install cargo-npm
+      - name: Build UI bundle
+        run: npm run build:ui
 
-      - name: Download all binaries
-        uses: actions/download-artifact@v4
-        with:
-          path: target-artifacts
-
-      # Move downloaded binaries back to target/<triple>/release/
-      # so cargo-npm generate can detect them.
-      - name: Structure Target Binaries
-        run: |
-          mkdir -p target/x86_64-pc-windows-msvc/release
-          mkdir -p target/x86_64-unknown-linux-gnu/release
-          mkdir -p target/aarch64-unknown-linux-gnu/release
-          mkdir -p target/x86_64-apple-darwin/release
-          mkdir -p target/aarch64-apple-darwin/release
-
-          cp target-artifacts/binary-x86_64-pc-windows-msvc/orion.exe target/x86_64-pc-windows-msvc/release/
-          cp target-artifacts/binary-x86_64-pc-windows-msvc/update_titles.exe target/x86_64-pc-windows-msvc/release/ || true
-
-          cp target-artifacts/binary-x86_64-unknown-linux-gnu/orion target/x86_64-unknown-linux-gnu/release/
-          cp target-artifacts/binary-x86_64-unknown-linux-gnu/update_titles target/x86_64-unknown-linux-gnu/release/ || true
-
-          cp target-artifacts/binary-aarch64-unknown-linux-gnu/orion target/aarch64-unknown-linux-gnu/release/
-          cp target-artifacts/binary-aarch64-unknown-linux-gnu/update_titles target/aarch64-unknown-linux-gnu/release/ || true
-
-          cp target-artifacts/binary-x86_64-apple-darwin/orion target/x86_64-apple-darwin/release/
-          cp target-artifacts/binary-x86_64-apple-darwin/update_titles target/x86_64-apple-darwin/release/ || true
-
-          cp target-artifacts/binary-aarch64-apple-darwin/orion target/aarch64-apple-darwin/release/
-          cp target-artifacts/binary-aarch64-apple-darwin/update_titles target/aarch64-apple-darwin/release/ || true
-
-      - name: Generate Packages
-        run: cargo npm generate
-
-      - name: List generated packages
-        run: |
-          echo "=== npm/ directory ==="
-          find npm -type f -name 'package.json' | while read f; do
-            echo "--- $f ---"
-            cat "$f"
-            echo
-          done
-          echo "=== bin scripts ==="
-          find npm -name '*.js' -exec echo {} \; -exec head -20 {} \;
-
-      - name: Configure NPM Authentication
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+      - name: Run tests
+        run: npx tsx tests/sticky_and_scroll.test.ts
 
       - name: Publish to NPM
-        run: cargo npm publish -- --access public
-
-
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
