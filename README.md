@@ -1,6 +1,6 @@
 # Orion CLI 🌌
 
-[![npm version](https://img.shields.io/npm/v/orion-agent-cli.svg)](https://www.npmjs.com/package/orion-agent-cli)
+[![npm version](https://img.shields.io/npm/v/@chiro14/orion-agent-cli.svg)](https://www.npmjs.com/package/@chiro14/orion-agent-cli)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -47,7 +47,7 @@
 
 #### Via NPM (No dependencies required)
 ```bash
-npm install -g orion-agent-cli
+npm install -g @chiro14/orion-agent-cli
 ```
 *Note: This downloads the pre-compiled native machine-code binary for your OS (Windows, Linux, macOS) out of the box.*
 
