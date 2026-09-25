@@ -6,15 +6,78 @@ on:
       - 'v*'
 
 jobs:
-  publish-npm:
-    name: Publish NPM Package
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  # ─────────────────────────────────────────────────────────────
+  # Step 1: Build the native .node addon for each platform
+  # ─────────────────────────────────────────────────────────────
+  build-native:
+    name: Build .node – ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            use_cross: true
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross (for ARM Linux)
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install napi-rs CLI
+        run: npm install -g @napi-rs/cli
+
+      - name: Build native addon (standard)
+        if: ${{ !matrix.use_cross }}
+        run: napi build --platform --release --target ${{ matrix.target }}
+
+      - name: Build native addon (cross / ARM)
+        if: matrix.use_cross
+        run: napi build --platform --release --target ${{ matrix.target }} --cross-compile
+
+      - name: Upload .node artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: "*.node"
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 2: Build the UI bundle and publish to npm
+  # ─────────────────────────────────────────────────────────────
+  publish-npm:
+    name: Publish to NPM
+    needs: build-native
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
@@ -27,6 +90,19 @@ jobs:
 
       - name: Run tests
         run: npx tsx tests/sticky_and_scroll.test.ts
+
+      # Download all platform .node binaries into the package root
+      - name: Download all native binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: native-artifacts
+          merge-multiple: false
+
+      - name: Move .node files to package root
+        run: |
+          find native-artifacts -name '*.node' -exec cp {} . \;
+          ls -la *.node
 
       - name: Publish to NPM
         run: npm publish --access public

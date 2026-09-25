@@ -13,7 +13,11 @@
     "dist",
     "index.js",
     "index.d.ts",
-    "*.node",
+    "orion-core.win32-x64-msvc.node",
+    "orion-core.linux-x64-gnu.node",
+    "orion-core.linux-arm64-gnu.node",
+    "orion-core.darwin-x64.node",
+    "orion-core.darwin-arm64.node",
     "README.md",
     "LICENSE"
   ],
