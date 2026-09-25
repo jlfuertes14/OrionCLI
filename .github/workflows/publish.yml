@@ -7,7 +7,9 @@ on:
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # Step 1: Build the native .node addon for each platform
+  # Step 1: Build the cdylib .node addon for each platform
+  # Uses `cargo build --lib` to build ONLY the cdylib,
+  # NOT the [[bin]] target (which can't link napi symbols).
   # ─────────────────────────────────────────────────────────────
   build-native:
     name: Build .node – ${{ matrix.target }}
@@ -18,56 +20,92 @@ jobs:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
+            node_file: orion-core.win32-x64-msvc.node
+            lib_name: orion_core.dll
+
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            node_file: orion-core.linux-x64-gnu.node
+            lib_name: liborion_core.so
+
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            node_file: orion-core.linux-arm64-gnu.node
+            lib_name: liborion_core.so
             use_cross: true
+
+          # macos-13 is the last Intel (x86_64) runner
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-13
+            node_file: orion-core.darwin-x64.node
+            lib_name: liborion_core.dylib
+            macos_target: '13.0'
+
+          # macos-latest is now ARM (aarch64)
           - target: aarch64-apple-darwin
             os: macos-latest
+            node_file: orion-core.darwin-arm64.node
+            lib_name: liborion_core.dylib
+            macos_target: '11.0'
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
-      - name: Install cross (for ARM Linux)
+      # cross is the most reliable ARM Linux cross-compiler
+      - name: Install cross (ARM Linux only)
         if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - uses: actions/setup-node@v4
+        uses: taiki-e/install-action@v2
         with:
-          node-version: 22
+          tool: cross
 
-      - name: Install napi-rs CLI
-        run: npm install -g @napi-rs/cli
-
-      - name: Build native addon (standard)
+      # Build ONLY the cdylib ([lib] crate-type = ["cdylib"]).
+      # --lib ensures the [[bin]] target is never attempted,
+      # which would fail because napi symbols are not available
+      # in a standalone executable linker context.
+      - name: Build cdylib (standard targets)
         if: ${{ !matrix.use_cross }}
-        run: napi build --platform --release --target ${{ matrix.target }}
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target || '' }}
+        run: cargo build --lib --release --target ${{ matrix.target }}
 
-      - name: Build native addon (cross / ARM)
+      - name: Build cdylib (ARM Linux via cross)
         if: matrix.use_cross
-        run: napi build --platform --release --target ${{ matrix.target }} --cross-compile
+        run: cross build --lib --release --target ${{ matrix.target }}
+
+      # Rename platform output to the .node filename Node.js expects
+      - name: Rename output → .node (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp target/${{ matrix.target }}/release/${{ matrix.lib_name }} ${{ matrix.node_file }}
+          echo "Built: $(ls -lh ${{ matrix.node_file }})"
+
+      - name: Rename output → .node (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item "target\${{ matrix.target }}\release\${{ matrix.lib_name }}" "${{ matrix.node_file }}"
+          Write-Host "Built: $((Get-Item '${{ matrix.node_file }}').Length / 1MB) MB"
 
       - name: Upload .node artifact
         uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.target }}
-          path: "*.node"
+          path: ${{ matrix.node_file }}
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
-  # Step 2: Build the UI bundle and publish to npm
+  # Step 2: Build the UI bundle and publish to npm with all
+  #         platform .node binaries bundled in the package.
   # ─────────────────────────────────────────────────────────────
   publish-npm:
     name: Publish to NPM
@@ -91,8 +129,7 @@ jobs:
       - name: Run tests
         run: npx tsx tests/sticky_and_scroll.test.ts
 
-      # Download all platform .node binaries into the package root
-      - name: Download all native binaries
+      - name: Download all native .node artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: native-*
@@ -102,7 +139,8 @@ jobs:
       - name: Move .node files to package root
         run: |
           find native-artifacts -name '*.node' -exec cp {} . \;
-          ls -la *.node
+          echo "=== Bundled native addons ==="
+          ls -lh *.node
 
       - name: Publish to NPM
         run: npm publish --access public
