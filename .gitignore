@@ -27,6 +27,14 @@ Thumbs.db
 # Local built binaries
 /orion.exe
 /orion
+*.node
+
+# Node.js and UI build artifacts
+node_modules/
+dist/
+index.d.ts
 
 errors.md
+*.tmp
+.*.tmp
 

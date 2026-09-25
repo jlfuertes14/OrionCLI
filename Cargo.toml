@@ -1,11 +1,24 @@
 [package]
 name = "orion"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
-authors = ["JL <jl@orion.bot>"]
+authors = ["JL <jlfuertes14>"]
 description = "OrionBot CLI - High-performance agentic coding assistant in Rust"
 
+[lib]
+name = "orion_core"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "orion"
+path = "src/main.rs"
+
 [dependencies]
+# NAPI-RS Node.js Native Bindings
+napi = { version = "2.16", features = ["async", "tokio_rt", "serde-json"] }
+napi-derive = "2.16"
+
 # Async Runtime
 tokio = { version = "1.38", features = ["full"] }
 futures = "0.3.30"
@@ -34,7 +47,7 @@ dirs = "5.0.1"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 
 # HTTP & API Client
-reqwest = { version = "0.12.5", default-features = false, features = ["json", "stream", "rustls-tls"] }
+reqwest = { version = "0.12.5", features = ["json", "stream"] }
 reqwest-retry = "0.7"
 reqwest-middleware = "0.4"
 
@@ -52,6 +65,9 @@ regex = "1.12.4"
 [dev-dependencies]
 tempfile = "3.12"
 
+[build-dependencies]
+napi-build = "2.1"
+
 [profile.release]
 lto = true
 codegen-units = 1
@@ -60,8 +76,8 @@ strip = true
 opt-level = "z"
 
 [package.metadata.npm]
-name = "@chiro14/orion-agent-cli"
-prefix = "@chiro14/orion-agent-cli-"
+name = "orion-agent-cli"
+prefix = "orion-agent-cli-"
 targets = [
     "x86_64-pc-windows-msvc",
     "x86_64-unknown-linux-gnu",

@@ -1,13 +1,13 @@
-mod agent;
-mod cli;
-mod config;
-mod llm;
-mod mcp;
-mod multi_agent;
-mod sandbox;
-mod session;
-mod skills;
-mod tools;
+use orion_core::agent;
+use orion_core::cli;
+use orion_core::config;
+use orion_core::llm;
+use orion_core::mcp;
+use orion_core::multi_agent;
+use orion_core::sandbox;
+use orion_core::session;
+use orion_core::skills;
+use orion_core::tools;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -19,7 +19,7 @@ use config::Settings;
 #[derive(Parser, Debug)]
 #[command(name = "orion")]
 #[command(author = "JL <jl@orion.bot>")]
-#[command(version = "0.1.0")]
+#[command(version = "2.0.0")]
 #[command(about = "OrionBot CLI - High-performance agentic coding assistant in Rust", long_about = None)]
 struct Cli {
     /// Optional one-shot instruction prompt to run without launching REPL

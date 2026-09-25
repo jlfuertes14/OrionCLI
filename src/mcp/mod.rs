@@ -119,7 +119,7 @@ impl McpClient {
             "capabilities": {},
             "clientInfo": {
                 "name": "OrionBot-CLI",
-                "version": "0.1.0"
+                "version": env!("CARGO_PKG_VERSION")
             }
         });
         self.call_rpc("initialize", params).await?;

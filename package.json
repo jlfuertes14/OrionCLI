@@ -1,0 +1,49 @@
+{
+  "name": "orion-cli",
+  "version": "2.0.0",
+  "description": "OrionBot CLI - High-performance agentic coding assistant with TypeScript React Ink UI and Rust core",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "orion": "bin/orion.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "index.js",
+    "index.d.ts",
+    "*.node",
+    "README.md",
+    "LICENSE"
+  ],
+  "napi": {
+    "binaryName": "orion-core",
+    "packageName": "orion-core"
+  },
+  "scripts": {
+    "build:napi": "napi build --platform --release",
+    "build:napi:dev": "napi build --platform",
+    "build:ui": "tsup src/ui/cli.tsx --format esm --out-dir dist",
+    "build": "npm run build:napi && npm run build:ui",
+    "dev": "tsx src/ui/cli.tsx",
+    "test": "tsx tests/napi_tools.test.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.5",
+    "ink": "^5.1.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.0.0",
+    "@types/node": "^22.5.0",
+    "@types/react": "^18.3.3",
+    "tsup": "^8.2.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
