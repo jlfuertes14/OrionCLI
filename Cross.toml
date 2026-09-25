@@ -1,0 +1,10 @@
+# cross.toml — configuration for cross-rs cross compilation
+# Installs aarch64 OpenSSL headers on the cross Docker image as a fallback
+# (primary fix: reqwest uses rustls-tls which doesn't need system OpenSSL)
+
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update",
+    "apt-get install -y libssl-dev:arm64",
+]
