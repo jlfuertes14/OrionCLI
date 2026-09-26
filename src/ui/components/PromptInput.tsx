@@ -3,6 +3,12 @@ import { Box, Text, useInput } from 'ink';
 import { CommandPicker, COMMANDS, SlashCommand } from './CommandPicker.js';
 import { formatModelInfo } from '../theme.js';
 import { getClipboardText, setClipboardText } from '../clipboard.js';
+import {
+  isTerminalBackspace,
+  isTerminalForwardDelete,
+  stripMouseSequences,
+  isMouseSequence,
+} from '../stdinTracker.js';
 
 export interface LineInfo {
   text: string;
@@ -194,6 +200,11 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
   };
 
   useInput((input, key) => {
+    // 0. Filter mouse click / scroll escape sequences completely
+    if (isMouseSequence(input)) {
+      return;
+    }
+
     // 1. Ctrl+A: Select All text in prompt input
     if (key.ctrl && (input.toLowerCase() === 'a' || input === '\x01')) {
       if (value.length > 0) {
@@ -206,11 +217,9 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
     if (key.ctrl && (input.toLowerCase() === 'v' || input === '\x16')) {
       const clip = getClipboardText();
       if (clip) {
-        const cleaned = clip
+        const cleaned = stripMouseSequences(clip)
           .replace(/\r\n|\r|\n/g, ' ')
-          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-          .replace(/\x1b?\[<[\d;]*[Mm]?/g, '')
-          .replace(/\x1b?\[M[\s\S]{0,3}/g, '');
+          .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
         if (cleaned.length > 0) {
           if (isAllSelected) {
             setValue(cleaned);
@@ -238,6 +247,39 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
 
       if (input.toLowerCase() === 'e') {
         setCursorOffset(value.length);
+        return;
+      }
+
+      // Ctrl+U: Clear text before cursor (or clear input)
+      if (input.toLowerCase() === 'u' || input === '\x15') {
+        if (isAllSelected) {
+          setValue('');
+          setCursorOffset(0);
+          setIsAllSelected(false);
+        } else {
+          setValue((prev) => prev.slice(cursorOffset));
+          setCursorOffset(0);
+        }
+        return;
+      }
+
+      // Ctrl+W: Erase previous word
+      if (input.toLowerCase() === 'w' || input === '\x17') {
+        if (isAllSelected) {
+          setValue('');
+          setCursorOffset(0);
+          setIsAllSelected(false);
+          return;
+        }
+        if (cursorOffset > 0) {
+          const before = value.slice(0, cursorOffset);
+          const after = value.slice(cursorOffset);
+          const trimmed = before.replace(/\s+$/, '');
+          const lastSpace = trimmed.lastIndexOf(' ');
+          const newBefore = lastSpace >= 0 ? trimmed.slice(0, lastSpace + 1) : '';
+          setValue(newBefore + after);
+          setCursorOffset(newBefore.length);
+        }
         return;
       }
 
@@ -280,8 +322,8 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
       return;
     }
 
-    // 5. Backspace
-    if (key.backspace) {
+    // 5. Backspace (Erase character before cursor)
+    if (isTerminalBackspace(key, input)) {
       if (isAllSelected) {
         setValue('');
         setCursorOffset(0);
@@ -295,8 +337,8 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
       return;
     }
 
-    // 6. Delete
-    if (key.delete) {
+    // 6. Forward Delete (Erase character after cursor)
+    if (isTerminalForwardDelete(key)) {
       if (isAllSelected) {
         setValue('');
         setCursorOffset(0);
@@ -305,6 +347,21 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
       }
       if (cursorOffset < value.length) {
         setValue((prev) => prev.slice(0, cursorOffset) + prev.slice(cursorOffset + 1));
+      }
+      return;
+    }
+
+    // Fallback: If terminal sent raw delete and cursor is at end, treat as backspace
+    if (key.delete) {
+      if (isAllSelected) {
+        setValue('');
+        setCursorOffset(0);
+        setIsAllSelected(false);
+        return;
+      }
+      if (cursorOffset > 0) {
+        setValue((prev) => prev.slice(0, cursorOffset - 1) + prev.slice(cursorOffset));
+        setCursorOffset((prev) => prev - 1);
       }
       return;
     }
@@ -482,11 +539,9 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
       }
 
       // Filter mouse escape sequences and control characters
-      const cleaned = input
+      const cleaned = stripMouseSequences(input)
         .replace(/\r\n|\r|\n/g, ' ')
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
-        .replace(/\x1b?\[<[\d;]*[Mm]?/g, '')
-        .replace(/\x1b?\[M[\s\S]{0,3}/g, '');
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
       if (cleaned.length > 0) {
         if (isAllSelected) {
@@ -504,9 +559,6 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
 
   const accentColor = mode === 'plan' ? '#10B981' : '#3B82F6';
 
-  const statusPrefix = (mode === 'plan' ? 'Plan' : 'Build') + ' · ' + displayName + ' ' + (provider || '');
-  const statusPadSpaces = Math.max(0, innerWidth - 2 - statusPrefix.length);
-
   return (
     <Box flexDirection="column" marginY={0}>
       {isCommandMode && (
@@ -517,44 +569,29 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
         />
       )}
 
-      {/* OpenCode Signature Solid Gray Card with Continuous Left Accent Block */}
+      {/* OpenCode Signature Input with Continuous Left Accent Block */}
       <Box flexDirection="column" width={effectiveCardWidth} marginY={0}>
-        {/* Top Padding Row */}
-        <Box flexDirection="row" width={effectiveCardWidth} marginY={0}>
-          <Text color={accentColor} bold>█</Text>
-          <Text backgroundColor="#27272A">{' '.repeat(innerWidth)}</Text>
-        </Box>
-
         {/* Text Input Row(s): Supports word-wrapped multiline without layout distortion */}
         {value.length === 0 ? (
           (() => {
             const pLines = wrapTextWithIndices(placeholder || '', maxLineLength);
             return pLines.map((pLine, idx) => {
               const isFirst = idx === 0;
-              const hasCursor = !disabled && isFirst;
-              const displayLen = pLine.text.length > 0 ? pLine.text.length : (hasCursor ? 1 : 0);
-              const linePad = Math.max(0, innerWidth - 2 - displayLen);
               return (
                 <Box key={`placeholder-${idx}`} flexDirection="row" width={effectiveCardWidth} marginY={0}>
-                  <Text color={accentColor} bold>█</Text>
-                  <Box flexGrow={1} flexDirection="row">
-                    <Text backgroundColor="#27272A">
-                      {'  '}
-                      {disabled ? (
-                        <Text color="#71717A">{pLine.text || 'Thinking…'}</Text>
-                      ) : isFirst ? (
-                        <>
-                          <Text inverse color="#FFFFFF">
-                            {pLine.text.charAt(0) || ' '}
-                          </Text>
-                          <Text color="#71717A">{pLine.text.slice(1)}</Text>
-                        </>
-                      ) : (
-                        <Text color="#71717A">{pLine.text}</Text>
-                      )}
-                      {' '.repeat(linePad)}
-                    </Text>
-                  </Box>
+                  <Text color={accentColor} bold>█ </Text>
+                  {disabled ? (
+                    <Text color="#71717A">{pLine.text || 'Thinking…'}</Text>
+                  ) : isFirst ? (
+                    <>
+                      <Text inverse color="#FFFFFF">
+                        {pLine.text.charAt(0) || ' '}
+                      </Text>
+                      <Text color="#71717A">{pLine.text.slice(1)}</Text>
+                    </>
+                  ) : (
+                    <Text color="#71717A">{pLine.text}</Text>
+                  )}
                 </Box>
               );
             });
@@ -569,9 +606,6 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
                 (isLastLine ? cursorOffset <= line.endIndex : cursorOffset < line.endIndex)
               );
               const cursorInLine = cursorOffset - line.startIndex;
-              const cursorAtEnd = hasCursor && cursorInLine === line.text.length;
-              const renderedLen = line.text.length + (cursorAtEnd ? 1 : 0);
-              const linePad = Math.max(0, innerWidth - 2 - renderedLen);
 
               let content: React.ReactNode = <Text color="#FFFFFF">{line.text}</Text>;
               if (isAllSelected) {
@@ -597,14 +631,8 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
 
               return (
                 <Box key={`input-line-${idx}`} flexDirection="row" width={effectiveCardWidth} marginY={0}>
-                  <Text color={accentColor} bold>█</Text>
-                  <Box flexGrow={1} flexDirection="row">
-                    <Text backgroundColor="#27272A">
-                      {'  '}
-                      {content}
-                      {' '.repeat(linePad)}
-                    </Text>
-                  </Box>
+                  <Text color={accentColor} bold>█ </Text>
+                  {content}
                 </Box>
               );
             });
@@ -613,27 +641,15 @@ export const PromptInput: React.FC<PromptInputProps> = React.memo(({
 
         {/* Status Line: Build / Plan · Model Provider */}
         <Box flexDirection="row" width={effectiveCardWidth} marginY={0}>
-          <Text color={accentColor} bold>█</Text>
-          <Box flexGrow={1} flexDirection="row">
-            <Text backgroundColor="#27272A">
-              {'  '}
-              <Text bold color={mode === 'plan' ? '#10B981' : '#60A5FA'}>
-                {mode === 'plan' ? 'Plan' : 'Build'}
-              </Text>
-              <Text color="#52525B"> · </Text>
-              <Text bold color="#FFFFFF">
-                {displayName}
-              </Text>
-              <Text color="#71717A"> {provider}</Text>
-              {' '.repeat(statusPadSpaces)}
-            </Text>
-          </Box>
-        </Box>
-
-        {/* Bottom Padding Row */}
-        <Box flexDirection="row" width={effectiveCardWidth} marginY={0}>
-          <Text color={accentColor} bold>█</Text>
-          <Text backgroundColor="#27272A">{' '.repeat(innerWidth)}</Text>
+          <Text color={accentColor} bold>█ </Text>
+          <Text bold color={mode === 'plan' ? '#10B981' : '#60A5FA'}>
+            {mode === 'plan' ? 'Plan' : 'Build'}
+          </Text>
+          <Text color="#52525B"> · </Text>
+          <Text bold color="#FFFFFF">
+            {displayName}
+          </Text>
+          <Text color="#71717A"> {provider}</Text>
         </Box>
       </Box>
 

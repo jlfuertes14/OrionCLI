@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { hasApiKeyForProvider } from '../config.js';
+import { isTerminalBackspace } from '../stdinTracker.js';
 
 export interface ProviderDef {
   id: string;
@@ -91,12 +93,14 @@ interface ModelSelectorProps {
   currentModel: string;
   onSelect: (modelId: string) => void;
   onCancel: () => void;
+  onConfigureKey?: (providerId: string) => void;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
   currentModel,
   onSelect,
   onCancel,
+  onConfigureKey,
 }) => {
   const [selectedProviderIdx, setSelectedProviderIdx] = useState(0);
   const [step, setStep] = useState<'provider' | 'model'>('provider');
@@ -130,6 +134,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }
 
     if (step === 'provider') {
+      if (input.toLowerCase() === 'k' && onConfigureKey && activeProvider.id !== 'ollama') {
+        onConfigureKey(activeProvider.id);
+        return;
+      }
+
       if (key.upArrow) {
         setSelectedProviderIdx((prev) => (prev > 0 ? prev - 1 : PROVIDERS.length - 1));
       } else if (key.downArrow) {
@@ -147,8 +156,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         const chosen = activeModels[selectedModelIdx];
         if (chosen) {
           onSelect(chosen.id);
+          // If no key is set, also prompt to configure key
+          if (!hasApiKeyForProvider(activeProvider.id) && onConfigureKey && activeProvider.id !== 'ollama') {
+            onConfigureKey(activeProvider.id);
+          }
         }
-      } else if (key.backspace || key.leftArrow) {
+      } else if (isTerminalBackspace(key, input) || key.leftArrow) {
         setStep('provider');
       }
     }
@@ -161,24 +174,32 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           {step === 'provider' ? 'Select AI Provider' : `Select Model · ${activeProvider.name}`}
         </Text>
         <Text color="#71717A">
-          {step === 'provider' ? '↑↓ navigate • ↵ select • Esc cancel' : '↑↓ navigate • ↵ select • Esc/← back'}
+          {step === 'provider' ? '↑↓ navigate • ↵ select • k set key • Esc cancel' : '↑↓ navigate • ↵ select • Esc/← back'}
         </Text>
       </Box>
 
       {step === 'provider' ? (
         PROVIDERS.map((prov, idx) => {
           const isSelected = idx === selectedProviderIdx;
+          const hasKey = hasApiKeyForProvider(prov.id);
           return (
-            <Box key={prov.id} flexDirection="row">
-              <Text color={isSelected ? '#FFFFFF' : '#3F3F46'}>
-                {isSelected ? '❯ ' : '  '}
-              </Text>
-              <Text bold={isSelected} color={isSelected ? '#FFFFFF' : '#D4D4D8'}>
-                {prov.name.padEnd(16)}
-              </Text>
-              <Text color={isSelected ? '#E4E4E7' : '#71717A'}>
-                {prov.description}
-              </Text>
+            <Box key={prov.id} flexDirection="row" justifyContent="space-between">
+              <Box flexDirection="row">
+                <Text color={isSelected ? '#FFFFFF' : '#3F3F46'}>
+                  {isSelected ? '❯ ' : '  '}
+                </Text>
+                <Text bold={isSelected} color={isSelected ? '#FFFFFF' : '#D4D4D8'}>
+                  {prov.name.padEnd(16)}
+                </Text>
+                <Text color={isSelected ? '#E4E4E7' : '#71717A'}>
+                  {prov.description}
+                </Text>
+              </Box>
+              {prov.id !== 'ollama' && (
+                <Text color={hasKey ? '#10B981' : '#F59E0B'}>
+                  {hasKey ? '✓ configured' : '● key needed'}
+                </Text>
+              )}
             </Box>
           );
         })

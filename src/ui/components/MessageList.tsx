@@ -658,18 +658,8 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
       if (msg.role === 'user') {
         const userLines = msg.content.split('\n');
 
-        // Top padding line with thick blue bar & solid gray background
-        nodes.push(
-          <Box key={`${msg.id}_top`} flexDirection="row" width={cardWidth} marginY={0}>
-            <Text color="#3B82F6" bold>█</Text>
-            <Text backgroundColor="#27272A">{' '.repeat(innerWidth)}</Text>
-          </Box>
-        );
-
-        // User prompt lines with solid gray background spanning full unified width
+        // Clean minimalist user prompt with blue accent bar without solid gray background
         userLines.forEach((uLine, uIdx) => {
-          const lineText = '  ' + (uLine || '');
-          const padLen = Math.max(0, innerWidth - lineText.length);
           nodes.push(
             <Box
               key={`${msg.id}_${uIdx}`}
@@ -677,21 +667,11 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
               width={cardWidth}
               marginY={0}
             >
-              <Text color="#3B82F6" bold>█</Text>
-              <Text backgroundColor="#27272A" color="#FFFFFF">
-                {lineText + ' '.repeat(padLen)}
-              </Text>
+              <Text color="#3B82F6" bold>█ </Text>
+              <Text color="#FFFFFF" bold>{uLine}</Text>
             </Box>
           );
         });
-
-        // Bottom padding line with thick blue bar & solid gray background
-        nodes.push(
-          <Box key={`${msg.id}_bot`} flexDirection="row" width={cardWidth} marginY={0}>
-            <Text color="#3B82F6" bold>█</Text>
-            <Text backgroundColor="#27272A">{' '.repeat(innerWidth)}</Text>
-          </Box>
-        );
         nodes.push(
           <Box key={`${msg.id}_bot_sp`} marginY={0}>
             <Text>{' '}</Text>

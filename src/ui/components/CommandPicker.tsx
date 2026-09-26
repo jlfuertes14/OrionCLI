@@ -14,6 +14,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: '/learn', description: 'Synthesize solution into persistent skill in .orion/skills/ (Hermes engine)' },
   { name: '/lsp', description: 'Inspect compiler-grade LSP status & semantic tools (OpenCode strategy)' },
   { name: '/model', description: 'Switch active LLM model or provider' },
+  { name: '/key', description: 'Configure or update provider API keys (saved globally to ~/.orion/.env)' },
   { name: '/help', description: 'Show all available commands and shortcuts' },
   { name: '/status', description: 'Show git status and active workspace details' },
   { name: '/diff', description: 'Inspect current uncommitted git changes' },

@@ -1,18 +1,16 @@
-#!/usr/bin/env node
 import 'dotenv/config';
 import React from 'react';
 import { render } from 'ink';
 import { Command } from 'commander';
 import { Repl } from './components/Repl.js';
+import { initGlobalConfig, detectDefaultModel } from './config.js';
+
+// Load global configuration and API keys from ~/.orion/.env
+initGlobalConfig();
 
 const program = new Command();
 
-const defaultModel =
-  process.env.ORION_PROVIDER && process.env.ORION_MODEL
-    ? `${process.env.ORION_PROVIDER}:${process.env.ORION_MODEL}`
-    : process.env.MISTRAL_API_KEY
-    ? 'mistral:mistral-medium-3.5'
-    : 'anthropic:claude-3-5-sonnet';
+const defaultModel = detectDefaultModel();
 
 program
   .name('orion')
@@ -23,10 +21,10 @@ program
   .option('-r, --resume <session_id>', 'Resume a saved session by ID')
   .action((prompt, options) => {
     // Enter alternate screen buffer & set terminal background to deep pitch-black #000000 (OpenCode style)
-    // Enable SGR mouse tracking mode (\x1b[?1000h\x1b[?1006h) for smooth mouse scroll wheel support
+    // Explicitly disable mouse reporting mode (\x1b[?1006l\x1b[?1000l) to prevent clicks from sending raw coordinates into stdin
     process.stdout.write(
       '\x1b[?1049h' +
-      '\x1b[?1000h\x1b[?1006h' +
+      '\x1b[?1006l\x1b[?1000l' +
       '\x1b]11;#000000\x07\x1b]11;#000000\x1b\\' +
       '\x1b]10;#E4E4E7\x07\x1b]10;#E4E4E7\x1b\\' +
       '\x1b[48;2;0;0;0m\x1b[38;2;228;228;231m' +

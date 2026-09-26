@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { core } from '../core.js';
+import { isTerminalForwardDelete } from '../stdinTracker.js';
 
 export interface SessionItem {
   id: string;
@@ -66,7 +67,7 @@ export const SessionSelector: React.FC<SessionSelectorProps> = ({
       if (sessions[selectedIndex]) {
         onSelect(sessions[selectedIndex].id);
       }
-    } else if (input.toLowerCase() === 'd' || key.delete) {
+    } else if (input.toLowerCase() === 'd' || isTerminalForwardDelete(key)) {
       const target = sessions[selectedIndex];
       if (target) {
         core.deleteSession(target.id).then(() => {

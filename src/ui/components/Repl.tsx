@@ -10,10 +10,12 @@ import { ToolApproval } from './ToolApproval.js';
 import { MessageList, ChatMessage, PendingToolCall } from './MessageList.js';
 import { StatusBadge, AgentStatus } from './StatusBadge.js';
 import { OpenCodeLoader } from './OpenCodeLoader.js';
+import { KeyInputModal } from './KeyInputModal.js';
 import { core, DiffLine } from '../core.js';
 import { streamChat, synthesizeSkillFromSession, LlmMessage } from '../llm.js';
 import { getSkill, loadAllSkills, LoadedSkill } from '../skills.js';
 import { formatCwdWithBranch } from '../theme.js';
+import { hasApiKeyForModel } from '../config.js';
 
 interface ReplProps {
   initialPrompt?: string;
@@ -35,7 +37,10 @@ export const Repl: React.FC<ReplProps> = ({
   const [pendingToolCall, setPendingToolCall] = useState<PendingToolCall | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
   const [activeSkills, setActiveSkills] = useState<LoadedSkill[]>([]);
-  const [activeSelector, setActiveSelector] = useState<'none' | 'model' | 'session' | 'command' | 'skill'>('none');
+  const [activeSelector, setActiveSelector] = useState<'none' | 'model' | 'session' | 'command' | 'skill' | 'key'>('none');
+  const [keyTargetProvider, setKeyTargetProvider] = useState<string>('anthropic');
+  const [pendingPromptAfterKey, setPendingPromptAfterKey] = useState<string | null>(null);
+  const [keyModalNotice, setKeyModalNotice] = useState<string | undefined>();
   const [pendingApproval, setPendingApproval] = useState<{
     toolName: string;
     args: Record<string, any>;
@@ -67,10 +72,10 @@ export const Repl: React.FC<ReplProps> = ({
     setScrollOffset((prev) => Math.max(0, prev - lines));
   };
 
-  // Enable SGR mouse tracking in TTY and intercept mouse wheel events
+  // Ensure terminal mouse click reporting is explicitly disabled
   useEffect(() => {
     if (process.stdout.isTTY) {
-      process.stdout.write('\x1b[?1000h\x1b[?1006h');
+      process.stdout.write('\x1b[?1006l\x1b[?1000l');
     }
 
     const sgrRegex = /\x1b?\[<(\d+);?(\d+)?;?(\d+)?([Mm]?)/g;
@@ -223,6 +228,11 @@ export const Repl: React.FC<ReplProps> = ({
 
     if (initialPrompt) {
       handlePromptSubmit(initialPrompt);
+    } else if (!hasApiKeyForModel(model) && !model.startsWith('ollama')) {
+      const [prov] = model.includes(':') ? model.split(':') : ['anthropic'];
+      setKeyTargetProvider(prov);
+      setKeyModalNotice(`No API key configured for ${prov.toUpperCase()}. Please enter your API key to get started:`);
+      setActiveSelector('key');
     }
   }, []);
 
@@ -248,6 +258,14 @@ export const Repl: React.FC<ReplProps> = ({
 
     if (cmd.name === '/model') {
       setActiveSelector('model');
+      return;
+    }
+
+    if (cmd.name === '/key' || cmd.name === '/keys' || cmd.name === '/config') {
+      const [prov] = model.includes(':') ? model.split(':') : ['anthropic'];
+      setKeyTargetProvider(prov);
+      setKeyModalNotice(undefined);
+      setActiveSelector('key');
       return;
     }
 
@@ -302,6 +320,7 @@ export const Repl: React.FC<ReplProps> = ({
             '  /learn     - Extract recent solution into persistent .orion/skills/ skill',
             '  /lsp       - Inspect compiler-grade LSP status & semantic tools',
             '  /model     - Open interactive AI provider & model selector',
+            '  /key       - Configure or update provider API keys (saved to ~/.orion/.env)',
             '  /session   - Browse, resume, or delete chat sessions from SQLite',
             '  /status    - Inspect git repository status & working tree',
             '  /diff      - View uncommitted git diffs',
@@ -473,9 +492,26 @@ export const Repl: React.FC<ReplProps> = ({
       return;
     }
 
+    if (prompt.trim() === '/key' || prompt.trim() === '/keys' || prompt.trim() === '/config') {
+      const [prov] = model.includes(':') ? model.split(':') : ['anthropic'];
+      setKeyTargetProvider(prov);
+      setKeyModalNotice(undefined);
+      setActiveSelector('key');
+      return;
+    }
+
     if (prompt.startsWith('/learn')) {
       const topic = prompt.replace(/^\/learn\s*/, '').trim();
       await executeLearnCommand(topic || undefined);
+      return;
+    }
+
+    if (!hasApiKeyForModel(model) && !model.startsWith('ollama')) {
+      const [prov] = model.includes(':') ? model.split(':') : ['anthropic'];
+      setKeyTargetProvider(prov);
+      setPendingPromptAfterKey(prompt);
+      setKeyModalNotice(`No API key configured for ${prov.toUpperCase()}. Please enter your API key to send your prompt.`);
+      setActiveSelector('key');
       return;
     }
 
@@ -663,7 +699,43 @@ export const Repl: React.FC<ReplProps> = ({
                   setModel(selectedModel);
                   setActiveSelector('none');
                 }}
+                onConfigureKey={(provId) => {
+                  setKeyTargetProvider(provId);
+                  setActiveSelector('key');
+                }}
                 onCancel={() => setActiveSelector('none')}
+              />
+            </Box>
+          )}
+
+          {activeSelector === 'key' && (
+            <Box flexDirection="column" width={Math.max(30, dimensions.cols - 2)} marginTop={1}>
+              <KeyInputModal
+                initialProvider={keyTargetProvider}
+                notice={keyModalNotice}
+                cardWidth={Math.max(30, dimensions.cols - 2)}
+                onSave={(providerId) => {
+                  setActiveSelector('none');
+                  setKeyModalNotice(undefined);
+                  setMessages((prev) => [
+                    ...prev,
+                    {
+                      id: String(Date.now()),
+                      role: 'assistant',
+                      content: `✓ API key for ${providerId.toUpperCase()} saved to ~/.orion/.env`,
+                    },
+                  ]);
+                  if (pendingPromptAfterKey) {
+                    const nextPrompt = pendingPromptAfterKey;
+                    setPendingPromptAfterKey(null);
+                    handlePromptSubmit(nextPrompt);
+                  }
+                }}
+                onCancel={() => {
+                  setActiveSelector('none');
+                  setPendingPromptAfterKey(null);
+                  setKeyModalNotice(undefined);
+                }}
               />
             </Box>
           )}
@@ -802,8 +874,44 @@ export const Repl: React.FC<ReplProps> = ({
               setModel(selectedModel);
               setActiveSelector('none');
             }}
+            onConfigureKey={(provId) => {
+              setKeyTargetProvider(provId);
+              setActiveSelector('key');
+            }}
             onCancel={() => setActiveSelector('none')}
           />
+        )}
+
+        {activeSelector === 'key' && (
+          <Box flexDirection="column" width={unifiedCardWidth} marginTop={0}>
+            <KeyInputModal
+              initialProvider={keyTargetProvider}
+              notice={keyModalNotice}
+              cardWidth={unifiedCardWidth}
+              onSave={(providerId) => {
+                setActiveSelector('none');
+                setKeyModalNotice(undefined);
+                setMessages((prev) => [
+                  ...prev,
+                  {
+                    id: String(Date.now()),
+                    role: 'assistant',
+                    content: `✓ API key for ${providerId.toUpperCase()} saved to ~/.orion/.env`,
+                  },
+                ]);
+                if (pendingPromptAfterKey) {
+                  const nextPrompt = pendingPromptAfterKey;
+                  setPendingPromptAfterKey(null);
+                  handlePromptSubmit(nextPrompt);
+                }
+              }}
+              onCancel={() => {
+                setActiveSelector('none');
+                setPendingPromptAfterKey(null);
+                setKeyModalNotice(undefined);
+              }}
+            />
+          </Box>
         )}
 
         {activeSelector === 'session' && (

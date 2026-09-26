@@ -127,7 +127,7 @@ jobs:
         run: npm run build:ui
 
       - name: Run tests
-        run: npx tsx tests/sticky_and_scroll.test.ts
+        run: npx tsx tests/sticky_and_scroll.test.ts && npx tsx tests/input_erase_and_key_config.test.ts
 
       - name: Download all native .node artifacts
         uses: actions/download-artifact@v4

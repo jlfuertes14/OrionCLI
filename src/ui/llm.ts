@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { core } from './core.js';
 import { formatSkillsPrompt, saveSynthesizedSkill, getSkill, loadAllSkills } from './skills.js';
 import { lspFindDefinition, lspFindReferences } from './lsp.js';
+import { getApiKeyForProvider } from './config.js';
 
 export interface LlmMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -36,7 +37,7 @@ function resolveProvider(modelSpec: string): ProviderConfig {
 
   switch (prov) {
     case 'mistral': {
-      const apiKey = process.env.MISTRAL_API_KEY || process.env.MISTRAL_VIBE_API_KEY || '';
+      const apiKey = getApiKeyForProvider('mistral') || '';
       return {
         baseUrl: 'https://api.mistral.ai/v1',
         apiKey,
@@ -44,7 +45,7 @@ function resolveProvider(modelSpec: string): ProviderConfig {
       };
     }
     case 'openrouter': {
-      const apiKey = process.env.OPENROUTER_API_KEY || '';
+      const apiKey = getApiKeyForProvider('openrouter') || '';
       return {
         baseUrl: 'https://openrouter.ai/api/v1',
         apiKey,
@@ -52,7 +53,7 @@ function resolveProvider(modelSpec: string): ProviderConfig {
       };
     }
     case 'openai': {
-      const apiKey = process.env.OPENAI_API_KEY || '';
+      const apiKey = getApiKeyForProvider('openai') || '';
       return {
         baseUrl: 'https://api.openai.com/v1',
         apiKey,
@@ -60,7 +61,7 @@ function resolveProvider(modelSpec: string): ProviderConfig {
       };
     }
     case 'groq': {
-      const apiKey = process.env.GROQ_API_KEY || '';
+      const apiKey = getApiKeyForProvider('groq') || '';
       return {
         baseUrl: 'https://api.groq.com/openai/v1',
         apiKey,
@@ -68,7 +69,7 @@ function resolveProvider(modelSpec: string): ProviderConfig {
       };
     }
     case 'gemini': {
-      const apiKey = process.env.GEMINI_API_KEY || '';
+      const apiKey = getApiKeyForProvider('gemini') || '';
       return {
         baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
         apiKey,
@@ -85,23 +86,24 @@ function resolveProvider(modelSpec: string): ProviderConfig {
     }
     default: {
       if (prov === 'anthropic') {
-        const apiKey = process.env.ANTHROPIC_API_KEY || '';
+        const apiKey = getApiKeyForProvider('anthropic') || '';
         return {
           baseUrl: 'https://api.anthropic.com/v1',
           apiKey,
           modelId: rawModel || 'claude-3-5-sonnet-latest',
         };
       }
-      if (process.env.MISTRAL_API_KEY) {
+      const mistralKey = getApiKeyForProvider('mistral');
+      if (mistralKey) {
         return {
           baseUrl: 'https://api.mistral.ai/v1',
-          apiKey: process.env.MISTRAL_API_KEY,
+          apiKey: mistralKey,
           modelId: modelSpec,
         };
       }
       return {
         baseUrl: 'https://openrouter.ai/api/v1',
-        apiKey: process.env.OPENROUTER_API_KEY || '',
+        apiKey: getApiKeyForProvider('openrouter') || '',
         modelId: modelSpec,
       };
     }
@@ -283,7 +285,7 @@ export async function streamChat(options: StreamChatOptions): Promise<string> {
   const config = resolveProvider(model);
   if (!config.apiKey && !model.startsWith('ollama')) {
     const providerName = model.split(':')[0].toUpperCase();
-    throw new Error(`Missing ${providerName}_API_KEY in .env file. Please check your credentials.`);
+    throw new Error(`Missing ${providerName}_API_KEY. Type /key to configure your API key (saved globally to ~/.orion/.env).`);
   }
 
   const skillsContext = formatSkillsPrompt();
