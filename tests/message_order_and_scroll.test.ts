@@ -68,4 +68,60 @@ if (filteredMultiTurn[0].role !== 'user' || filteredMultiTurn[1].role !== 'assis
 }
 console.log('✔ Case 3 Passed: Multi-turn history cleanly maintains user -> assistant -> user sequence');
 
-console.log('\n🎉 ALL MESSAGE ORDER & TOOL SANITIZATION TESTS PASSED SUCCESSFULLY!');
+// Case 4: Parallel Tool Calls (Exact scenario: "check my src folder and read the codebase")
+const parallelToolHistory = [
+  { role: 'user', content: 'check my src folder and read the codebase' },
+  {
+    role: 'assistant',
+    content: '',
+    tool_calls: [
+      { id: 'call_dir_1', type: 'function', function: { name: 'list_directory', arguments: '{"path":"src"}' } },
+      { id: 'call_read_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/index.ts"}' } },
+      { id: 'call_read_2', type: 'function', function: { name: 'read_file', arguments: '{"path":"src/core.ts"}' } },
+    ],
+  },
+  { role: 'tool', tool_call_id: 'call_dir_1', name: 'list_directory', content: 'index.ts\ncore.ts' },
+  { role: 'tool', tool_call_id: 'call_read_1', name: 'read_file', content: 'console.log("index");' },
+  { role: 'tool', tool_call_id: 'call_read_2', name: 'read_file', content: 'console.log("core");' },
+];
+
+const sanitized4 = sanitizeMessageOrder(parallelToolHistory);
+
+// Verify ALL 3 parallel tool responses are preserved as role: 'tool'
+if (sanitized4.length !== 5) {
+  throw new Error(`Test 4 Failed: Expected 5 messages, got ${sanitized4.length}`);
+}
+if (sanitized4[2].role !== 'tool' || sanitized4[2].tool_call_id !== 'call_dir_1') {
+  throw new Error(`Test 4 Failed: Tool 1 corrupted: ${JSON.stringify(sanitized4[2])}`);
+}
+if (sanitized4[3].role !== 'tool' || sanitized4[3].tool_call_id !== 'call_read_1') {
+  throw new Error(`Test 4 Failed: Tool 2 corrupted into ${sanitized4[3].role}`);
+}
+if (sanitized4[4].role !== 'tool' || sanitized4[4].tool_call_id !== 'call_read_2') {
+  throw new Error(`Test 4 Failed: Tool 3 corrupted into ${sanitized4[4].role}`);
+}
+
+// Invariant Check: The LAST role must be 'user' or 'tool' (NEVER 'assistant')
+const lastRole4 = sanitized4[sanitized4.length - 1].role;
+if (lastRole4 !== 'user' && lastRole4 !== 'tool') {
+  throw new Error(`Test 4 Failed: Expected last role 'user' or 'tool', got: '${lastRole4}'`);
+}
+console.log('✔ Case 4 Passed: Multiple parallel tool calls preserved as role: tool, and last role is "tool"');
+
+// Case 5: Trailing Assistant Message must never be served as last message to Mistral
+const trailingAssistantHistory = [
+  { role: 'user', content: 'hello' },
+  { role: 'assistant', content: 'Hello there!' },
+];
+
+const sanitized5 = sanitizeMessageOrder(trailingAssistantHistory);
+const lastRole5 = sanitized5[sanitized5.length - 1].role;
+if (lastRole5 === 'assistant') {
+  throw new Error(`Test 5 Failed: Trailing assistant role was not sanitized: ${lastRole5}`);
+}
+if (lastRole5 !== 'user' && lastRole5 !== 'tool') {
+  throw new Error(`Test 5 Failed: Expected last role 'user' or 'tool', got: '${lastRole5}'`);
+}
+console.log('✔ Case 5 Passed: Trailing assistant message automatically prompts continuation so last role is NEVER assistant');
+
+console.log('\n🎉 ALL MESSAGE ORDER & PARALLEL TOOL SANITIZATION TESTS PASSED SUCCESSFULLY!');

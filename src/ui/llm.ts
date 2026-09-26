@@ -267,35 +267,69 @@ export const TOOLS_SCHEMA = [
 
 /**
  * Sanitizes chat messages to ensure strict compliance with OpenAI / Mistral message ordering rules:
- * - A 'tool' message must immediately follow an 'assistant' message that has 'tool_calls'.
- * - Any orphan 'tool' message (e.g. directly following 'user' or lacking preceding tool_calls) is safely converted to an assistant observation
- *   to prevent HTTP 400 invalid_request_message_order ("Unexpected role 'tool' after role 'user'").
+ * 1. An assistant message may initiate one or more parallel tool_calls.
+ * 2. All following tool messages that match those tool_calls (including multiple consecutive tool messages)
+ *    are preserved as valid 'tool' role messages.
+ * 3. Any orphan 'tool' message that does NOT match an active tool_call from the preceding assistant is
+ *    safely attached as context to the user prompt or converted to user context (never left as a trailing assistant message).
+ * 4. Invariant: The LAST message in the array MUST be 'user' or 'tool' (Mistral serving strictly forbids 'assistant' as last role).
  */
 export function sanitizeMessageOrder(rawMessages: any[]): any[] {
   const result: any[] = [];
+  let activeToolCallIds = new Set<string>();
+
   for (let i = 0; i < rawMessages.length; i++) {
     const current = rawMessages[i];
-    if (current.role === 'tool') {
-      const prev = result[result.length - 1];
-      const prevHasToolCalls =
-        prev &&
-        prev.role === 'assistant' &&
-        Array.isArray(prev.tool_calls) &&
-        prev.tool_calls.some((tc: any) => tc.id === current.tool_call_id);
 
-      if (prevHasToolCalls) {
-        result.push(current);
+    if (current.role === 'assistant') {
+      if (Array.isArray(current.tool_calls) && current.tool_calls.length > 0) {
+        activeToolCallIds = new Set(current.tool_calls.map((tc: any) => tc.id));
       } else {
-        // If orphan tool message, convert to assistant message to preserve context without violating API schema
+        activeToolCallIds.clear();
+      }
+      result.push(current);
+    } else if (current.role === 'tool') {
+      let matchedId = current.tool_call_id;
+      if (!matchedId && activeToolCallIds.size > 0) {
+        matchedId = activeToolCallIds.values().next().value;
+      }
+
+      if (matchedId && activeToolCallIds.has(matchedId)) {
+        activeToolCallIds.delete(matchedId);
         result.push({
-          role: 'assistant',
-          content: `[Tool Execution: ${current.name || 'tool'}]\n${current.content}`,
+          ...current,
+          tool_call_id: matchedId,
         });
+      } else {
+        // Orphan tool message with no preceding matching tool_call:
+        // Do NOT push as 'assistant', which would violate Mistral's last role requirement if at end!
+        const prev = result[result.length - 1];
+        if (prev && prev.role === 'user') {
+          prev.content = `${prev.content}\n\n[Tool Output: ${current.name || 'tool'}]\n${current.content}`;
+        } else {
+          result.push({
+            role: 'user',
+            content: `[Tool Output: ${current.name || 'tool'}]\n${current.content}`,
+          });
+        }
       }
     } else {
+      // System or User message
+      activeToolCallIds.clear();
       result.push(current);
     }
   }
+
+  // Ensure last role requirement: Mistral strictly demands that the last message must be 'user' or 'tool'
+  while (result.length > 0 && result[result.length - 1].role === 'assistant') {
+    const last = result[result.length - 1];
+    if (Array.isArray(last.tool_calls) && last.tool_calls.length > 0) {
+      delete last.tool_calls;
+    }
+    result.push({ role: 'user', content: 'Continue' });
+    break;
+  }
+
   return result;
 }
 
