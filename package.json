@@ -1,6 +1,6 @@
 {
   "name": "@chiro14/orion-agent-cli",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "OrionBot CLI - High-performance agentic coding assistant with TypeScript React Ink UI and Rust core",
   "type": "module",
   "main": "index.js",
@@ -31,7 +31,7 @@
     "build:ui": "tsup src/ui/cli.tsx --format esm --out-dir dist",
     "build": "npm run build:napi && npm run build:ui",
     "dev": "tsx src/ui/cli.tsx",
-    "test": "tsx tests/napi_tools.test.ts && tsx tests/input_erase_and_key_config.test.ts"
+    "test": "tsx tests/napi_tools.test.ts && tsx tests/input_erase_and_key_config.test.ts && tsx tests/sticky_and_scroll.test.ts && tsx tests/message_order_and_scroll.test.ts"
   },
   "dependencies": {
     "chalk": "^5.3.0",

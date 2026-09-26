@@ -21,10 +21,10 @@ program
   .option('-r, --resume <session_id>', 'Resume a saved session by ID')
   .action((prompt, options) => {
     // Enter alternate screen buffer & set terminal background to deep pitch-black #000000 (OpenCode style)
-    // Explicitly disable mouse reporting mode (\x1b[?1006l\x1b[?1000l) to prevent clicks from sending raw coordinates into stdin
+    // Enable SGR mouse reporting mode (\x1b[?1000h\x1b[?1006h) so mouse wheel scrolling functions smoothly
     process.stdout.write(
       '\x1b[?1049h' +
-      '\x1b[?1006l\x1b[?1000l' +
+      '\x1b[?1000h\x1b[?1006h' +
       '\x1b]11;#000000\x07\x1b]11;#000000\x1b\\' +
       '\x1b]10;#E4E4E7\x07\x1b]10;#E4E4E7\x1b\\' +
       '\x1b[48;2;0;0;0m\x1b[38;2;228;228;231m' +

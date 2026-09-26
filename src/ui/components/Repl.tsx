@@ -72,10 +72,10 @@ export const Repl: React.FC<ReplProps> = ({
     setScrollOffset((prev) => Math.max(0, prev - lines));
   };
 
-  // Ensure terminal mouse click reporting is explicitly disabled
+  // Enable terminal SGR mouse reporting mode for mouse wheel scrolling
   useEffect(() => {
     if (process.stdout.isTTY) {
-      process.stdout.write('\x1b[?1006l\x1b[?1000l');
+      process.stdout.write('\x1b[?1000h\x1b[?1006h');
     }
 
     const sgrRegex = /\x1b?\[<(\d+);?(\d+)?;?(\d+)?([Mm]?)/g;
@@ -411,11 +411,12 @@ export const Repl: React.FC<ReplProps> = ({
     setCurrentTool('synthesizing_skill');
 
     try {
-      const chatHistory: LlmMessage[] = messages.map((m) => ({
-        role: m.role as any,
-        content: m.content,
-        name: (m as any).toolName,
-      }));
+      const chatHistory: LlmMessage[] = messages
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        }));
 
       const res = await synthesizeSkillFromSession(chatHistory, model, topicHint);
       setMessages((prev) => [
@@ -538,15 +539,9 @@ export const Repl: React.FC<ReplProps> = ({
       }
 
       for (const m of messages) {
-        if (m.role === 'tool') {
+        if (m.role === 'user' || m.role === 'assistant') {
           chatHistory.push({
-            role: 'tool',
-            content: m.content,
-            name: m.toolName,
-          });
-        } else {
-          chatHistory.push({
-            role: m.role as any,
+            role: m.role,
             content: m.content,
           });
         }
@@ -663,8 +658,10 @@ export const Repl: React.FC<ReplProps> = ({
   const isWelcomeScreen = messages.length === 0;
 
   // Screen 1: Welcome Screen (No conversation started yet)
-  // Retains centered logo with input card directly below it (OpenCode style) - not sticky yet
+  // Sticky Chat Input at bottom, centered Logo above
   if (isWelcomeScreen) {
+    const unifiedCardWidth = Math.max(30, dimensions.cols - 2);
+
     return (
       <Box
         flexDirection="column"
@@ -674,14 +671,14 @@ export const Repl: React.FC<ReplProps> = ({
         paddingX={1}
         paddingY={0}
       >
-        {/* Centered Hero Section: Logo + Input Card below it */}
+        {/* Centered Upper Area: Logo */}
         <Box
           flexDirection="column"
           alignItems="center"
           justifyContent="center"
           flexGrow={1}
+          overflow="hidden"
         >
-          {/* Centered Floating Logo */}
           <Header
             model={model}
             cwd={cwd}
@@ -689,31 +686,32 @@ export const Repl: React.FC<ReplProps> = ({
             version={core.version()}
             compact={false}
           />
+        </Box>
 
-          {/* Interactive Modal Selectors when triggered in welcome screen */}
+        {/* Permanently Sticky Bottom Area in Welcome Screen */}
+        <Box flexDirection="column" flexShrink={0} marginTop={0}>
+          {/* Interactive Modal Selectors */}
           {activeSelector === 'model' && (
-            <Box width={Math.min(76, dimensions.cols - 4)} marginY={1}>
-              <ModelSelector
-                currentModel={model}
-                onSelect={(selectedModel) => {
-                  setModel(selectedModel);
-                  setActiveSelector('none');
-                }}
-                onConfigureKey={(provId) => {
-                  setKeyTargetProvider(provId);
-                  setActiveSelector('key');
-                }}
-                onCancel={() => setActiveSelector('none')}
-              />
-            </Box>
+            <ModelSelector
+              currentModel={model}
+              onSelect={(selectedModel) => {
+                setModel(selectedModel);
+                setActiveSelector('none');
+              }}
+              onConfigureKey={(provId) => {
+                setKeyTargetProvider(provId);
+                setActiveSelector('key');
+              }}
+              onCancel={() => setActiveSelector('none')}
+            />
           )}
 
           {activeSelector === 'key' && (
-            <Box flexDirection="column" width={Math.max(30, dimensions.cols - 2)} marginTop={1}>
+            <Box flexDirection="column" width={unifiedCardWidth} marginTop={0}>
               <KeyInputModal
                 initialProvider={keyTargetProvider}
                 notice={keyModalNotice}
-                cardWidth={Math.max(30, dimensions.cols - 2)}
+                cardWidth={unifiedCardWidth}
                 onSave={(providerId) => {
                   setActiveSelector('none');
                   setKeyModalNotice(undefined);
@@ -741,47 +739,41 @@ export const Repl: React.FC<ReplProps> = ({
           )}
 
           {activeSelector === 'session' && (
-            <Box width={Math.min(76, dimensions.cols - 4)} marginY={1}>
-              <SessionSelector
-                onSelect={(sessionId) => {
-                  setActiveSelector('none');
-                }}
-                onCancel={() => setActiveSelector('none')}
-              />
-            </Box>
+            <SessionSelector
+              onSelect={(sessionId) => {
+                setActiveSelector('none');
+              }}
+              onCancel={() => setActiveSelector('none')}
+            />
           )}
 
           {activeSelector === 'command' && (
-            <Box width={Math.min(76, dimensions.cols - 4)} marginY={1}>
-              <CommandPicker
-                commands={COMMANDS}
-                onSelect={(cmd) => {
-                  setActiveSelector('none');
-                  handleCommandSelect(cmd);
-                }}
-                onCancel={() => setActiveSelector('none')}
-              />
-            </Box>
+            <CommandPicker
+              commands={COMMANDS}
+              onSelect={(cmd) => {
+                setActiveSelector('none');
+                handleCommandSelect(cmd);
+              }}
+              onCancel={() => setActiveSelector('none')}
+            />
           )}
 
           {activeSelector === 'skill' && (
-            <Box width={Math.min(76, dimensions.cols - 4)} marginY={1}>
-              <SkillSelector
-                onSelect={(selectedSkill) => {
-                  setActiveSelector('none');
-                  activateSkillIntoSession(selectedSkill);
-                }}
-                onCancel={() => setActiveSelector('none')}
-              />
-            </Box>
+            <SkillSelector
+              onSelect={(selectedSkill) => {
+                setActiveSelector('none');
+                activateSkillIntoSession(selectedSkill);
+              }}
+              onCancel={() => setActiveSelector('none')}
+            />
           )}
 
-          {/* Centered Chat Input Card below Logo - Not sticky when no convo yet */}
+          {/* Sticky Prompt Input Card */}
           {activeSelector === 'none' && !pendingApproval && (
             <Box
               flexDirection="column"
-              width={Math.max(30, dimensions.cols - 2)}
-              marginTop={1}
+              width={unifiedCardWidth}
+              marginTop={0}
             >
               <PromptInput
                 onSubmit={handlePromptSubmit}
@@ -793,40 +785,55 @@ export const Repl: React.FC<ReplProps> = ({
                 mode={mode}
                 onToggleMode={handleToggleMode}
                 disabled={status === 'thinking' || status === 'executing'}
-                showTip={true}
+                showTip={false}
                 placeholder='Ask anything... (e.g. "Fix a TODO")'
-                cardWidth={Math.max(30, dimensions.cols - 2)}
+                cardWidth={unifiedCardWidth}
                 initialHistory={messages.filter((m) => m.role === 'user').map((m) => m.content)}
+                footerRight={null}
               />
             </Box>
           )}
-        </Box>
 
-        {/* Live Status & Loader Bar just above directory line */}
-        {(status === 'thinking' || status === 'executing') && (
+          {/* Live Status & Loader Bar */}
           <Box
             flexDirection="row"
             justifyContent="space-between"
             alignItems="center"
-            width={Math.max(30, dimensions.cols - 2)}
+            width={unifiedCardWidth}
             marginTop={0}
           >
-            <OpenCodeLoader
-              showInterrupt={true}
-              label={status === 'executing' && currentTool ? currentTool : undefined}
-            />
+            <Box flexDirection="row" alignItems="center">
+              {status === 'thinking' || status === 'executing' ? (
+                <OpenCodeLoader
+                  showInterrupt={true}
+                  label={status === 'executing' && currentTool ? currentTool : undefined}
+                />
+              ) : (
+                <Box flexDirection="row">
+                  <Text color="#FFFFFF">tab </Text>
+                  <Text color="#71717A">{mode === 'build' ? 'plan' : 'build'}  </Text>
+                  <Text color="#FFFFFF">ctrl+o </Text>
+                  <Text color="#71717A">models</Text>
+                </Box>
+              )}
+            </Box>
+
             <Box flexDirection="row" alignItems="center">
               <Text color="#71717A">
-                {tokensFormatted} ({contextPct}%) · {costFormatted}
+                {tokensFormatted} ({contextPct}%) · {costFormatted}{'  '}
               </Text>
+              <Text bold color="#FFFFFF">
+                ctrl+p{' '}
+              </Text>
+              <Text color="#71717A">commands</Text>
             </Box>
           </Box>
-        )}
 
-        {/* OpenCode Bottom Status Bar: ~\Desktop\Projects\orion-cli:main          0.1.0 */}
-        <Box flexDirection="row" justifyContent="space-between" flexShrink={0} marginTop={0}>
-          <Text color="#71717A">{formatCwdWithBranch(cwd, gitBranch)}</Text>
-          <Text color="#71717A">{core.version()}</Text>
+          {/* OpenCode Bottom Status Bar: ~\Desktop\Projects\orion-cli:main          0.1.0 */}
+          <Box flexDirection="row" justifyContent="space-between" width={unifiedCardWidth} marginTop={0}>
+            <Text color="#71717A">{formatCwdWithBranch(cwd, gitBranch)}</Text>
+            <Text color="#71717A">{core.version()}</Text>
+          </Box>
         </Box>
       </Box>
     );

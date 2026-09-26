@@ -488,9 +488,9 @@ function renderTableLines(headers: string[], rows: string[][], baseKey: string):
 }
 
 /**
- * High-performance markdown parser that converts content into an array of 1-line visual nodes
+ * High-performance markdown parser that converts content into an array of strictly 1-line visual nodes
  */
-function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNode[] {
+function renderFormattedContent(content: string, keyPrefix = 'c', innerWidth = 80): React.ReactNode[] {
   const lines = content.split('\n');
   const renderedElements: React.ReactNode[] = [];
   let i = 0;
@@ -530,7 +530,9 @@ function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNo
             borderBottom={false}
             borderLeftColor="#52525B"
           >
-            <Text color="#E4E4E7">{cLine || ' '}</Text>
+            <Text color="#E4E4E7">
+              {cLine.length > innerWidth - 3 ? cLine.slice(0, innerWidth - 4) + '…' : (cLine || ' ')}
+            </Text>
           </Box>
         );
         i++;
@@ -573,7 +575,7 @@ function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNo
     if (/^---+$|^\*\*\*+$/.test(trimmed)) {
       renderedElements.push(
         <Box key={`${keyPrefix}_hr_${i}`} marginY={0}>
-          <Text color="#3F3F46">────────────────────────────────────────────────────────────────</Text>
+          <Text color="#3F3F46">{'─'.repeat(Math.min(innerWidth, 64))}</Text>
         </Box>
       );
       i++;
@@ -596,13 +598,16 @@ function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNo
           </Box>
         );
       }
-      renderedElements.push(
-        <Box key={`${keyPrefix}_head_${i}`} marginY={0}>
-          <Text bold color={headingColor}>
-            {renderInlineText(headingText, headingColor)}
-          </Text>
-        </Box>
-      );
+      const headingWrapped = wrapCellText(headingText, innerWidth);
+      headingWrapped.forEach((hLine, hIdx) => {
+        renderedElements.push(
+          <Box key={`${keyPrefix}_head_${i}_${hIdx}`} marginY={0}>
+            <Text bold color={headingColor}>
+              {renderInlineText(hLine, headingColor)}
+            </Text>
+          </Box>
+        );
+      });
       i++;
       continue;
     }
@@ -611,25 +616,54 @@ function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNo
     const bulletMatch = line.match(/^(\s*[-*•]\s+)([^:]+:)(.*)$/);
     if (bulletMatch) {
       const [, bullet, keyword, rest] = bulletMatch;
-      renderedElements.push(
-        <Box key={`${keyPrefix}_bullet_${i}`} flexDirection="row">
-          <Text color="#71717A">{bullet}</Text>
-          <Text bold color="#F97316">
-            {cleanText(keyword)}{' '}
-          </Text>
-          <Text color="#E4E4E7">{renderInlineText(rest)}</Text>
-        </Box>
-      );
+      const prefixStr = bullet + cleanText(keyword) + ' ';
+      const availRest = Math.max(10, innerWidth - prefixStr.length);
+      const wrappedRest = wrapCellText(rest.trim(), availRest);
+      if (wrappedRest.length <= 1) {
+        renderedElements.push(
+          <Box key={`${keyPrefix}_bullet_${i}`} flexDirection="row">
+            <Text color="#71717A">{bullet}</Text>
+            <Text bold color="#F97316">
+              {cleanText(keyword)}{' '}
+            </Text>
+            <Text color="#E4E4E7">{renderInlineText(rest)}</Text>
+          </Box>
+        );
+      } else {
+        wrappedRest.forEach((rLine, rIdx) => {
+          if (rIdx === 0) {
+            renderedElements.push(
+              <Box key={`${keyPrefix}_bullet_${i}_0`} flexDirection="row">
+                <Text color="#71717A">{bullet}</Text>
+                <Text bold color="#F97316">
+                  {cleanText(keyword)}{' '}
+                </Text>
+                <Text color="#E4E4E7">{renderInlineText(rLine)}</Text>
+              </Box>
+            );
+          } else {
+            renderedElements.push(
+              <Box key={`${keyPrefix}_bullet_${i}_${rIdx}`} flexDirection="row">
+                <Text>{' '.repeat(prefixStr.length)}</Text>
+                <Text color="#E4E4E7">{renderInlineText(rLine)}</Text>
+              </Box>
+            );
+          }
+        });
+      }
       i++;
       continue;
     }
 
-    // 6. Standard text line with inline bold & code parsing
-    renderedElements.push(
-      <Box key={`${keyPrefix}_line_${i}`}>
-        <Text>{renderInlineText(line)}</Text>
-      </Box>
-    );
+    // 6. Standard text line with inline bold & code parsing wrapped to innerWidth
+    const wrappedLines = wrapCellText(line, innerWidth);
+    wrappedLines.forEach((wLine, wIdx) => {
+      renderedElements.push(
+        <Box key={`${keyPrefix}_line_${i}_${wIdx}`}>
+          <Text>{renderInlineText(wLine)}</Text>
+        </Box>
+      );
+    });
     i++;
   }
 
@@ -660,17 +694,21 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
 
         // Clean minimalist user prompt with blue accent bar without solid gray background
         userLines.forEach((uLine, uIdx) => {
-          nodes.push(
-            <Box
-              key={`${msg.id}_${uIdx}`}
-              flexDirection="row"
-              width={cardWidth}
-              marginY={0}
-            >
-              <Text color="#3B82F6" bold>█ </Text>
-              <Text color="#FFFFFF" bold>{uLine}</Text>
-            </Box>
-          );
+          const maxTextW = Math.max(10, innerWidth - 3);
+          const wrapped = wrapCellText(uLine || ' ', maxTextW);
+          wrapped.forEach((wLine, wIdx) => {
+            nodes.push(
+              <Box
+                key={`${msg.id}_${uIdx}_${wIdx}`}
+                flexDirection="row"
+                width={cardWidth}
+                marginY={0}
+              >
+                <Text color="#3B82F6" bold>█ </Text>
+                <Text color="#FFFFFF" bold>{wLine}</Text>
+              </Box>
+            );
+          });
         });
         nodes.push(
           <Box key={`${msg.id}_bot_sp`} marginY={0}>
@@ -705,57 +743,72 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
           const topSkills = parsedSkills.slice(0, 5);
 
           nodes.push(
-            <Box key={msg.id} flexDirection="column" marginY={0}>
-              <Box flexDirection="row">
-                <Text color="#71717A"># {desc}</Text>
-              </Box>
-              <Box flexDirection="row">
-                <Text color="#71717A">$ </Text>
-                <Text color="#E4E4E7">{cmd || 'npx skills find'}</Text>
-              </Box>
-              <Box marginY={0}>
-                <Text>{' '}</Text>
-              </Box>
-              <Box flexDirection="column">
-                <Text bold color="#C084FC">
-                  🎨 Top {topic} Skills
-                </Text>
-                <Text bold color="#60A5FA">
-                  High-Install Skills (100K+)
-                </Text>
-              </Box>
-              <Box marginY={0}>
-                <Text>{' '}</Text>
-              </Box>
-              {topSkills.length > 0 ? (
-                <>
-                  {renderGridTable(
-                    ['Skill', 'Installs', 'Owner', 'Link'],
-                    topSkills.map((item) => [
-                      item.skill,
-                      item.installs,
-                      item.owner,
-                      item.link,
-                    ]),
-                    `${msg.id}_tbl`,
-                    cardWidth
-                  )}
-                  {parsedSkills.length > 5 ? (
-                    <Box marginY={0} paddingLeft={1}>
-                      <Text color="#71717A">
-                        ... +{parsedSkills.length - 5} more skills available with npx skills add
-                      </Text>
-                    </Box>
-                  ) : null}
-                </>
-              ) : (
-                <Box flexDirection="column">
-                  <Text color="#A1A1AA">{msg.content.trim()}</Text>
+            <Box key={`${msg.id}_desc`} flexDirection="row">
+              <Text color="#71717A"># {desc}</Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_cmd`} flexDirection="row">
+              <Text color="#71717A">$ </Text>
+              <Text color="#E4E4E7">{cmd || 'npx skills find'}</Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_sp1`} marginY={0}>
+              <Text>{' '}</Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_h1`}>
+              <Text bold color="#C084FC">
+                🎨 Top {topic} Skills
+              </Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_h2`}>
+              <Text bold color="#60A5FA">
+                High-Install Skills (100K+)
+              </Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_sp2`} marginY={0}>
+              <Text>{' '}</Text>
+            </Box>
+          );
+          if (topSkills.length > 0) {
+            const tblNodes = renderGridTable(
+              ['Skill', 'Installs', 'Owner', 'Link'],
+              topSkills.map((item) => [
+                item.skill,
+                item.installs,
+                item.owner,
+                item.link,
+              ]),
+              `${msg.id}_tbl`,
+              cardWidth
+            );
+            nodes.push(...tblNodes);
+            if (parsedSkills.length > 5) {
+              nodes.push(
+                <Box key={`${msg.id}_more`} marginY={0} paddingLeft={1}>
+                  <Text color="#71717A">
+                    ... +{parsedSkills.length - 5} more skills available with npx skills add
+                  </Text>
                 </Box>
-              )}
-              <Box marginY={0}>
-                <Text>{' '}</Text>
+              );
+            }
+          } else {
+            nodes.push(
+              <Box key={`${msg.id}_raw`}>
+                <Text color="#A1A1AA">{msg.content.trim()}</Text>
               </Box>
+            );
+          }
+          nodes.push(
+            <Box key={`${msg.id}_sp3`} marginY={0}>
+              <Text>{' '}</Text>
             </Box>
           );
         } else if (cmd) {
@@ -767,30 +820,35 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
           const displayLines = hasMore ? outputLines.slice(0, 3) : outputLines;
 
           nodes.push(
-            <Box key={msg.id} flexDirection="column" marginY={0}>
-              <Box flexDirection="row">
-                <Text color={isError ? '#EF4444' : '#71717A'}># {desc}</Text>
+            <Box key={`${msg.id}_desc`} flexDirection="row">
+              <Text color={isError ? '#EF4444' : '#71717A'}># {desc}</Text>
+            </Box>
+          );
+          nodes.push(
+            <Box key={`${msg.id}_cmd`} flexDirection="row">
+              <Text color="#71717A">$ </Text>
+              <Text color="#E4E4E7">{cmd}</Text>
+            </Box>
+          );
+          displayLines.forEach((line, idx) => {
+            nodes.push(
+              <Box key={`${msg.id}_out_${idx}`}>
+                <Text color={isError ? '#EF4444' : '#A1A1AA'}>
+                  {line.length > innerWidth ? line.slice(0, innerWidth - 1) + '…' : line}
+                </Text>
               </Box>
-              <Box flexDirection="row">
-                <Text color="#71717A">$ </Text>
-                <Text color="#E4E4E7">{cmd}</Text>
+            );
+          });
+          if (hasMore) {
+            nodes.push(
+              <Box key={`${msg.id}_more`}>
+                <Text color="#71717A">... ({outputLines.length - 3} more lines)</Text>
               </Box>
-              {displayLines.map((line, idx) => (
-                <Box key={`${msg.id}_out_${idx}`}>
-                  <Text color={isError ? '#EF4444' : '#A1A1AA'}>
-                    {line.length > 80 ? line.slice(0, 77) + '…' : line}
-                  </Text>
-                </Box>
-              ))}
-              {hasMore && (
-                <Box flexDirection="column">
-                  <Text color="#71717A">...</Text>
-                  <Text color="#71717A">Click to expand</Text>
-                </Box>
-              )}
-              <Box marginY={0}>
-                <Text>{' '}</Text>
-              </Box>
+            );
+          }
+          nodes.push(
+            <Box key={`${msg.id}_sp`} marginY={0}>
+              <Text>{' '}</Text>
             </Box>
           );
         } else {
@@ -818,7 +876,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
           ? (msg.durationMs / 1000).toFixed(1) + 's'
           : '1.2s';
 
-        const contentNodes = renderFormattedContent(msg.content, msg.id);
+        const contentNodes = renderFormattedContent(msg.content, msg.id, innerWidth);
         nodes.push(...contentNodes);
 
         // OpenCode Execution Pill: ▣ Build / Plan · Model · Latency
@@ -848,23 +906,27 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
       const cmd = getCommandLine(pendingToolCall.toolName, pendingToolCall.args);
 
       nodes.push(
-        <Box key={`pending_${pendingToolCall.id}`} flexDirection="column" marginY={0}>
+        <Box key={`pending_${pendingToolCall.id}_ht`} marginY={0}>
           <LoadingHashtag description={desc} />
-          {cmd ? (
-            <Box flexDirection="row">
-              <Text color="#71717A">$ </Text>
-              <Text color="#E4E4E7">{cmd}</Text>
-            </Box>
-          ) : null}
-          <Box marginY={0}>
-            <Text>{' '}</Text>
+        </Box>
+      );
+      if (cmd) {
+        nodes.push(
+          <Box key={`pending_${pendingToolCall.id}_cmd`} flexDirection="row">
+            <Text color="#71717A">$ </Text>
+            <Text color="#E4E4E7">{cmd}</Text>
           </Box>
+        );
+      }
+      nodes.push(
+        <Box key={`pending_${pendingToolCall.id}_sp`} marginY={0}>
+          <Text>{' '}</Text>
         </Box>
       );
     }
 
     if (streamingContent !== undefined) {
-      const streamNodes = renderFormattedContent(streamingContent, 'streaming');
+      const streamNodes = renderFormattedContent(streamingContent, 'streaming', innerWidth);
       nodes.push(
         ...streamNodes,
         <Box key="streaming_pill" flexDirection="row" alignItems="center" marginY={0}>

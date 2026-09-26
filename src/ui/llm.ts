@@ -265,6 +265,40 @@ export const TOOLS_SCHEMA = [
   },
 ];
 
+/**
+ * Sanitizes chat messages to ensure strict compliance with OpenAI / Mistral message ordering rules:
+ * - A 'tool' message must immediately follow an 'assistant' message that has 'tool_calls'.
+ * - Any orphan 'tool' message (e.g. directly following 'user' or lacking preceding tool_calls) is safely converted to an assistant observation
+ *   to prevent HTTP 400 invalid_request_message_order ("Unexpected role 'tool' after role 'user'").
+ */
+export function sanitizeMessageOrder(rawMessages: any[]): any[] {
+  const result: any[] = [];
+  for (let i = 0; i < rawMessages.length; i++) {
+    const current = rawMessages[i];
+    if (current.role === 'tool') {
+      const prev = result[result.length - 1];
+      const prevHasToolCalls =
+        prev &&
+        prev.role === 'assistant' &&
+        Array.isArray(prev.tool_calls) &&
+        prev.tool_calls.some((tc: any) => tc.id === current.tool_call_id);
+
+      if (prevHasToolCalls) {
+        result.push(current);
+      } else {
+        // If orphan tool message, convert to assistant message to preserve context without violating API schema
+        result.push({
+          role: 'assistant',
+          content: `[Tool Execution: ${current.name || 'tool'}]\n${current.content}`,
+        });
+      }
+    } else {
+      result.push(current);
+    }
+  }
+  return result;
+}
+
 export async function streamChat(options: StreamChatOptions): Promise<string> {
   const {
     model,
@@ -304,7 +338,7 @@ When tests fail or code errors occur, audit the output, locate mistakes, fix the
 
   const systemPrompt = `${basePrompt}${skillsContext}`;
 
-  const formattedMessages: any[] = [
+  const rawFormattedMessages: any[] = [
     { role: 'system', content: systemPrompt },
     ...messages.map((m) => {
       const formatted: any = {
@@ -317,6 +351,8 @@ When tests fail or code errors occur, audit the output, locate mistakes, fix the
       return formatted;
     }),
   ];
+
+  const formattedMessages = sanitizeMessageOrder(rawFormattedMessages);
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
