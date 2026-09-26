@@ -1,28 +1,77 @@
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { platform, arch } from 'process';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load native addon built by napi-rs
-let nativeBinding: any = null;
+function getBinaryName(): string | null {
+  const p = platform;
+  const a = arch;
 
-try {
-  // First try the root compiled index.js / index.node
-  nativeBinding = require('../../index.js');
-} catch (e1) {
-  try {
-    nativeBinding = require('../../orion-core.win32-x64-msvc.node');
-  } catch (e2) {
+  if (p === 'win32' && a === 'x64')   return 'orion-core.win32-x64-msvc.node';
+  if (p === 'linux' && a === 'x64')   return 'orion-core.linux-x64-gnu.node';
+  if (p === 'linux' && a === 'arm64') return 'orion-core.linux-arm64-gnu.node';
+  if (p === 'darwin' && a === 'x64')  return 'orion-core.darwin-x64.node';
+  if (p === 'darwin' && a === 'arm64')return 'orion-core.darwin-arm64.node';
+
+  return null;
+}
+
+function loadNativeBinding(): any {
+  const binaryName = getBinaryName();
+
+  const candidates: string[] = [
+    // 1. One level up (when bundled in dist/cli.js -> package root index.js)
+    path.resolve(__dirname, '../index.js'),
+    // 2. Two levels up (when running from src/ui/ in dev)
+    path.resolve(__dirname, '../../index.js'),
+  ];
+
+  if (binaryName) {
+    candidates.push(
+      path.resolve(__dirname, '..', binaryName),
+      path.resolve(__dirname, '../..', binaryName),
+      path.resolve(__dirname, binaryName),
+      path.resolve(process.cwd(), binaryName)
+    );
+  }
+
+  // Walk up from __dirname to search for binaryName or index.js
+  let curr = __dirname;
+  for (let depth = 0; depth < 5; depth++) {
+    if (binaryName) {
+      candidates.push(path.join(curr, binaryName));
+    }
+    candidates.push(path.join(curr, 'index.js'));
+    const parent = path.dirname(curr);
+    if (parent === curr) break;
+    curr = parent;
+  }
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate)) continue;
     try {
-      nativeBinding = require('../index.node');
-    } catch (e3) {
-      // Will be populated once napi build finishes
-      // console.warn('Native binary not yet loaded:', e1);
+      const raw = require(candidate);
+      const binding =
+        raw?.napiListDirectory ? raw :
+        raw?.default?.napiListDirectory ? raw.default :
+        raw;
+
+      if (binding && typeof binding.napiListDirectory === 'function') {
+        return binding;
+      }
+    } catch {
+      // Continue searching next candidate
     }
   }
+
+  return null;
 }
+
+const nativeBinding = loadNativeBinding();
 
 export interface DiffLine {
   tag: string;

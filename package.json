@@ -1,6 +1,6 @@
 {
   "name": "@chiro14/orion-agent-cli",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "OrionBot CLI - High-performance agentic coding assistant with TypeScript React Ink UI and Rust core",
   "type": "module",
   "main": "index.js",

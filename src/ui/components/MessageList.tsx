@@ -490,7 +490,7 @@ function renderTableLines(headers: string[], rows: string[][], baseKey: string):
 /**
  * High-performance markdown parser that converts content into an array of 1-line visual nodes
  */
-function renderFormattedContent(content: string): React.ReactNode[] {
+function renderFormattedContent(content: string, keyPrefix = 'c'): React.ReactNode[] {
   const lines = content.split('\n');
   const renderedElements: React.ReactNode[] = [];
   let i = 0;
@@ -505,7 +505,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
       i++;
       renderedElements.push(
         <Box
-          key={`code_hdr_${i}`}
+          key={`${keyPrefix}_code_hdr_${i}`}
           paddingLeft={1}
           borderStyle="single"
           borderLeft={true}
@@ -521,7 +521,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
         const cLine = lines[i];
         renderedElements.push(
           <Box
-            key={`code_ln_${i}`}
+            key={`${keyPrefix}_code_ln_${i}`}
             paddingLeft={1}
             borderStyle="single"
             borderLeft={true}
@@ -564,7 +564,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
       const headers = parseRow(tableLines[0]);
       const rows = tableLines.slice(2).map(parseRow);
 
-      const tableNodes = renderTableLines(headers, rows, `tbl_${i}`);
+      const tableNodes = renderTableLines(headers, rows, `${keyPrefix}_tbl_${i}`);
       renderedElements.push(...tableNodes);
       continue;
     }
@@ -572,7 +572,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
     // 3. Horizontal Rule (--- or ***)
     if (/^---+$|^\*\*\*+$/.test(trimmed)) {
       renderedElements.push(
-        <Box key={`hr_${i}`} marginY={0}>
+        <Box key={`${keyPrefix}_hr_${i}`} marginY={0}>
           <Text color="#3F3F46">────────────────────────────────────────────────────────────────</Text>
         </Box>
       );
@@ -591,13 +591,13 @@ function renderFormattedContent(content: string): React.ReactNode[] {
 
       if (renderedElements.length > 0) {
         renderedElements.push(
-          <Box key={`head_sp_${i}`} marginY={0}>
+          <Box key={`${keyPrefix}_head_sp_${i}`} marginY={0}>
             <Text>{' '}</Text>
           </Box>
         );
       }
       renderedElements.push(
-        <Box key={`head_${i}`} marginY={0}>
+        <Box key={`${keyPrefix}_head_${i}`} marginY={0}>
           <Text bold color={headingColor}>
             {renderInlineText(headingText, headingColor)}
           </Text>
@@ -612,7 +612,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
     if (bulletMatch) {
       const [, bullet, keyword, rest] = bulletMatch;
       renderedElements.push(
-        <Box key={`bullet_${i}`} flexDirection="row">
+        <Box key={`${keyPrefix}_bullet_${i}`} flexDirection="row">
           <Text color="#71717A">{bullet}</Text>
           <Text bold color="#F97316">
             {cleanText(keyword)}{' '}
@@ -626,7 +626,7 @@ function renderFormattedContent(content: string): React.ReactNode[] {
 
     // 6. Standard text line with inline bold & code parsing
     renderedElements.push(
-      <Box key={`line_${i}`}>
+      <Box key={`${keyPrefix}_line_${i}`}>
         <Text>{renderInlineText(line)}</Text>
       </Box>
     );
@@ -776,7 +776,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
                 <Text color="#E4E4E7">{cmd}</Text>
               </Box>
               {displayLines.map((line, idx) => (
-                <Box key={idx}>
+                <Box key={`${msg.id}_out_${idx}`}>
                   <Text color={isError ? '#EF4444' : '#A1A1AA'}>
                     {line.length > 80 ? line.slice(0, 77) + '…' : line}
                   </Text>
@@ -818,7 +818,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
           ? (msg.durationMs / 1000).toFixed(1) + 's'
           : '1.2s';
 
-        const contentNodes = renderFormattedContent(msg.content);
+        const contentNodes = renderFormattedContent(msg.content, msg.id);
         nodes.push(...contentNodes);
 
         // OpenCode Execution Pill: ▣ Build / Plan · Model · Latency
@@ -864,7 +864,7 @@ export const MessageList: React.FC<MessageListProps> = React.memo(({
     }
 
     if (streamingContent !== undefined) {
-      const streamNodes = renderFormattedContent(streamingContent);
+      const streamNodes = renderFormattedContent(streamingContent, 'streaming');
       nodes.push(
         ...streamNodes,
         <Box key="streaming_pill" flexDirection="row" alignItems="center" marginY={0}>
